@@ -97,11 +97,49 @@ public static class Installer
         log.Report("Fertig.");
     }
 
-    /// <summary>Extracts the aircraft ZIP; packages of the same name are moved to a backup folder first.</summary>
+    /// <summary>
+    /// All parts of a split aircraft archive ("Name-part1of3.zip" … "Name-part3of3.zip", each a complete ZIP),
+    /// given any one of them; a normal ZIP is returned as is.
+    /// </summary>
+    public static IReadOnlyList<string> FindAircraftParts(string zipPath)
+    {
+        var match = Regex.Match(Path.GetFileName(zipPath), @"^(?<base>.+)-part(?<n>\d+)of(?<total>\d+)\.zip$", RegexOptions.IgnoreCase);
+        if (!match.Success)
+        {
+            return [zipPath];
+        }
+        var directory = Path.GetDirectoryName(Path.GetFullPath(zipPath))!;
+        var total = int.Parse(match.Groups["total"].Value);
+        var parts = Enumerable.Range(1, total)
+            .Select(n => Path.Combine(directory, $"{match.Groups["base"].Value}-part{n}of{total}.zip"))
+            .ToList();
+        var missing = parts.Where(p => !File.Exists(p)).Select(Path.GetFileName).ToList();
+        if (missing.Count > 0)
+        {
+            throw new FileNotFoundException(
+                $"Es fehlen Teile des Flugzeugs: {string.Join(", ", missing)}. Alle Teile müssen im selben Ordner liegen.");
+        }
+        return parts;
+    }
+
+    /// <summary>Extracts the aircraft (all parts); packages of the same name are moved to a backup folder first.</summary>
     public static void InstallAircraft(string zipPath, string communityFolder, IProgress<string> log, CancellationToken token = default)
     {
-        using var zip = ZipFile.OpenRead(zipPath);
-        var packages = zip.Entries
+        var zips = FindAircraftParts(zipPath).Select(ZipFile.OpenRead).ToList();
+        try
+        {
+            InstallAircraft(zips, communityFolder, log, token);
+        }
+        finally
+        {
+            zips.ForEach(z => z.Dispose());
+        }
+    }
+
+    private static void InstallAircraft(List<ZipArchive> zips, string communityFolder, IProgress<string> log, CancellationToken token)
+    {
+        var entries = zips.SelectMany(z => z.Entries).ToList();
+        var packages = entries
             .Select(e => e.FullName.Replace('\\', '/').Split('/')[0])
             .Where(n => n.Length > 0)
             .Distinct()
@@ -125,10 +163,10 @@ public static class Installer
             }
         }
 
-        var total = zip.Entries.Count;
+        var total = entries.Count;
         var done = 0;
-        log.Report($"Entpacke das Flugzeug ({zip.Entries.Sum(e => e.Length) / 1024 / 1024} MB) …");
-        foreach (var entry in zip.Entries)
+        log.Report($"Entpacke das Flugzeug ({entries.Sum(e => e.Length) / 1024 / 1024} MB aus {zips.Count} Datei(en)) …");
+        foreach (var entry in entries)
         {
             token.ThrowIfCancellationRequested();
             ExtractEntry(entry, communityFolder, entry.FullName);

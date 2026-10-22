@@ -33,11 +33,11 @@ public partial class MainWindow : Window
             ? "Automatisch gefunden."
             : "Nicht automatisch gefunden. Bitte den Community-Ordner von MSFS 2024 auswählen (Ordner „Community“ im Paketordner).";
 
-        var besideSetup = Path.Combine(AppContext.BaseDirectory, "SharedDeck-A32NX.zip");
-        var besideProcess = Environment.ProcessPath is { } process
-            ? Path.Combine(Path.GetDirectoryName(process)!, "SharedDeck-A32NX.zip")
-            : besideSetup;
-        AircraftBox.Text = File.Exists(besideProcess) ? besideProcess : "";
+        // the aircraft next to the setup: one ZIP or the parts of a split download
+        var setupDirectory = Environment.ProcessPath is { } process ? Path.GetDirectoryName(process)! : AppContext.BaseDirectory;
+        AircraftBox.Text = Directory.GetFiles(setupDirectory, "SharedDeck-A32NX-part1of*.zip")
+                               .Concat(Directory.GetFiles(setupDirectory, "SharedDeck-A32NX.zip"))
+                               .FirstOrDefault() ?? "";
         if (Installer.IsInstalled())
         {
             Log("SharedDeck ist bereits installiert – die Installation aktualisiert es.");

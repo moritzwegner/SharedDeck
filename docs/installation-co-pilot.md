@@ -6,16 +6,18 @@ Die Installation dauert etwa 15 Minuten, den Download nicht mitgerechnet.
 
 ---
 
-## Was du vom Host bekommst
+## Download
 
-Zwei Dateien, am besten zusammen im selben Ordner, z. B. in `Downloads\SharedDeck`:
+Alle Dateien gibt es unter **Releases** im GitHub-Repo <https://github.com/moritzwegner/SharedDeck/releases>. Lade aus dem neuesten Release **alle** Dateien in denselben Ordner, z. B. `Downloads\SharedDeck`:
 
 | Datei | Größe | Inhalt |
 |---|---|---|
 | `SharedDeck-Setup.exe` | ca. 140 MB | die SharedDeck-App und das SharedDeck-Modul für MSFS |
-| `SharedDeck-A32NX.zip` | einige GB | der A320neo von FlyByWire in der SharedDeck-Version |
+| `SharedDeck-A32NX-part1of2.zip`, `…-part2of2.zip` | zusammen ca. 2,3 GB | der A320neo von FlyByWire in der SharedDeck-Version, wegen der Größe in Teilen |
 
-> **Wichtig:** Nimm genau die ZIP-Datei, die dir der Host gibt, und keine andere A32NX-Version. Beide müssen exakt denselben Stand haben, sonst lehnt die App die Verbindung ab.
+> **Wichtig:** Nimm dasselbe Release wie der Host. Ihr braucht exakt denselben Stand des Flugzeugs, sonst lehnt die App die Verbindung ab.
+>
+> Das Repo ist privat. Damit du die Dateien sehen kannst, muss der Host dich als Mitwirkenden zum Repo einladen (GitHub-Konto nötig).
 
 ## Schritt 1: MSFS 2024 schließen
 
@@ -31,7 +33,7 @@ Der Simulator darf während der Installation nicht laufen.
      - Microsoft Store: meist `C:\Users\<Name>\AppData\Local\Packages\Microsoft.Limitless_8wekyb3d8bbwe\LocalCache\Packages\Community`
      - Steam: der Ordner, den du bei der ersten Installation von MSFS 2024 als Paketordner gewählt hast, darin `Community`
      - Notfalls: In MSFS unter *Optionen → Allgemein → Entwickler* den Entwicklermodus einschalten. Danach zeigt *Werkzeuge → Virtuelles Dateisystem → Paketordner* den Pfad.
-   - **SharedDeck-A32NX (optional):** Liegt die ZIP-Datei neben dem Setup, ist das Feld schon ausgefüllt. Sonst über **…** die `SharedDeck-A32NX.zip` auswählen.
+   - **SharedDeck-A32NX (optional):** Liegen die ZIP-Teile neben dem Setup, ist das Feld schon ausgefüllt. Sonst über **…** einen der Teile auswählen. Das Setup installiert automatisch alle Teile, sie müssen nur im selben Ordner liegen.
 3. **Installieren** klicken. Das Entpacken des Flugzeugs dauert ein paar Minuten.
 4. Am Ende steht **Fertig.** im Fenster.
 

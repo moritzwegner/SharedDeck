@@ -79,6 +79,36 @@ public sealed class InstallerTests : IDisposable
     }
 
     [Fact]
+    public void InstallsAllPartsOfSplitAircraft()
+    {
+        var community = Directory.CreateDirectory(Path.Combine(root, "Community")).FullName;
+        for (var part = 1; part <= 2; part++)
+        {
+            using var zip = ZipFile.Open(Path.Combine(root, $"SharedDeck-A32NX-part{part}of2.zip"), ZipArchiveMode.Create);
+            Write(zip, $"flybywire-aircraft-a320-neo/file{part}.txt", $"{part}");
+        }
+
+        // any part can be chosen
+        Installer.InstallAircraft(Path.Combine(root, "SharedDeck-A32NX-part2of2.zip"), community, log);
+
+        Assert.Equal("1", File.ReadAllText(Path.Combine(community, "flybywire-aircraft-a320-neo", "file1.txt")));
+        Assert.Equal("2", File.ReadAllText(Path.Combine(community, "flybywire-aircraft-a320-neo", "file2.txt")));
+    }
+
+    [Fact]
+    public void ReportsMissingParts()
+    {
+        using (var zip = ZipFile.Open(Path.Combine(root, "SharedDeck-A32NX-part1of3.zip"), ZipArchiveMode.Create))
+        {
+            Write(zip, "flybywire-aircraft-a320-neo/a.txt", "a");
+        }
+        var error = Assert.Throws<FileNotFoundException>(() =>
+            Installer.FindAircraftParts(Path.Combine(root, "SharedDeck-A32NX-part1of3.zip")));
+        Assert.Contains("part2of3", error.Message);
+        Assert.Contains("part3of3", error.Message);
+    }
+
+    [Fact]
     public void AcceptsArchivesWithBackslashPaths()
     {
         var community = Directory.CreateDirectory(Path.Combine(root, "Community")).FullName;

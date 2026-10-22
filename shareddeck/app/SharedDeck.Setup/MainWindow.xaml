@@ -63,7 +63,7 @@
                 <StackPanel>
                     <TextBlock FontWeight="SemiBold" Text="SharedDeck-A32NX (optional)" />
                     <TextBlock Style="{StaticResource Hint}"
-                               Text="Die ZIP-Datei mit dem Flugzeug bekommst du vom Host. Ein vorhandener FlyByWire A32NX wird nicht gelöscht, sondern in den Ordner „SharedDeck-Backup“ neben dem Community-Ordner verschoben." />
+                               Text="Die ZIP-Datei(en) mit dem Flugzeug. Bei mehreren Teilen (…-part1of2.zip, …-part2of2.zip) einen davon wählen – alle Teile müssen im selben Ordner liegen. Ein vorhandener FlyByWire A32NX wird nicht gelöscht, sondern in den Ordner „SharedDeck-Backup“ neben dem Community-Ordner verschoben." />
                     <DockPanel Margin="0,6,0,0">
                         <Button DockPanel.Dock="Right" Content="…" Click="OnBrowseAircraft" Margin="6,0,0,0" Padding="10,2" />
                         <TextBox x:Name="AircraftBox" Padding="4" />

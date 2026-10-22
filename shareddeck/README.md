@@ -51,7 +51,7 @@ dotnet publish app/SharedDeck.App -c Release -r win-x64 --self-contained true -p
 # Tests der App und des Installers
 dotnet test app/SharedDeck.Tests
 
-# Installer (dist/SharedDeck-Setup.exe), mit -Aircraft zusätzlich dist/SharedDeck-A32NX.zip
+# Installer (dist/SharedDeck-Setup.exe), mit -Aircraft zusätzlich dist/SharedDeck-A32NX-partNofM.zip (Teile unter 2 GB für GitHub-Releases)
 powershell -ExecutionPolicy Bypass -File installer/build-installer.ps1 -Aircraft
 
 # FBW-Fork (aus vendor/flybywire-aircraft)

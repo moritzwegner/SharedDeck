@@ -11,8 +11,8 @@
 
 | Datei | Ort | Inhalt |
 |---|---|---|
-| `SharedDeck-Setup.exe` | `shareddeck/dist/` | App und SharedDeck-Modul, Installer mit Deinstallation |
-| `SharedDeck-A32NX.zip` | `shareddeck/dist/` | der SharedDeck-A32NX (FBW-Fork) |
+| `SharedDeck-Setup.exe` | `shareddeck/dist/` und GitHub-Releases | App und SharedDeck-Modul, Installer mit Deinstallation |
+| `SharedDeck-A32NX-part1of2.zip`, `…-part2of2.zip` | `shareddeck/dist/` und GitHub-Releases | der SharedDeck-A32NX (FBW-Fork), in Teilen unter 2 GB |
 | Tailscale (empfohlen) | <https://tailscale.com> | beide im selben Tailnet |
 
 Wichtig: **Beide müssen exakt denselben Build des Flugzeugs verwenden.** Die App prüft das beim Verbinden und lehnt ab, wenn die Builds verschieden sind. Gib deinem Freund deshalb genau diese beiden Dateien.
@@ -28,7 +28,7 @@ Die Schritt-für-Schritt-Anleitung für deinen Freund steht in [installation-co-
 Wer lieber per Kommandozeile installiert:
 
 ```bash
-SharedDeck-Setup.exe /silent /aircraft:SharedDeck-A32NX.zip /log:setup.log
+SharedDeck-Setup.exe /silent /aircraft:SharedDeck-A32NX-part1of2.zip /log:setup.log
 ```
 
 ## 3. Netzwerk

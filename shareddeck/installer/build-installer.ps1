@@ -48,15 +48,28 @@ Copy-Item (Join-Path $dist 'build\setup\SharedDeck-Setup.exe') (Join-Path $dist 
 Write-Host "Fertig: $(Join-Path $dist 'SharedDeck-Setup.exe')"
 
 if ($Aircraft) {
+    # GitHub release assets may be at most 2 GiB: the aircraft is split into parts, each a complete ZIP
+    $partLimit = 1700MB
     $out = Join-Path (Split-Path -Parent $root) 'vendor\flybywire-aircraft\fbw-a32nx\out'
-    $aircraftZip = Join-Path $dist 'SharedDeck-A32NX.zip'
-    Write-Host "Flugzeug packen nach $aircraftZip (dauert einige Minuten) ..."
-    if (Test-Path $aircraftZip) { Remove-Item $aircraftZip }
-    $zip = [System.IO.Compression.ZipFile]::Open($aircraftZip, 'Create')
+    Get-ChildItem $dist -Filter 'SharedDeck-A32NX*.zip' | Remove-Item
+    Write-Host 'Flugzeug packen (dauert einige Minuten) ...'
+
+    $parts = @()
+    $stream = $null
+    $zip = $null
+    function Open-Part {
+        $script:parts += Join-Path $dist "SharedDeck-A32NX-part$($script:parts.Count + 1).tmp"
+        $script:stream = [System.IO.File]::Open($script:parts[-1], 'CreateNew')
+        $script:zip = New-Object System.IO.Compression.ZipArchive($script:stream, 'Create')
+    }
+    Open-Part
     try {
         foreach ($package in 'flybywire-aircraft-a320-neo', 'flybywire-aircraft-a320-neo-lock-highlight') {
-            $packageDir = Join-Path $out $package
-            Get-ChildItem $packageDir -Recurse -File | ForEach-Object {
+            Get-ChildItem (Join-Path $out $package) -Recurse -File | ForEach-Object {
+                if ($stream.Length -gt $partLimit) {
+                    $zip.Dispose()
+                    Open-Part
+                }
                 $relative = $_.FullName.Substring($out.Length + 1).Replace('\', '/')
                 [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $_.FullName, $relative, 'Fastest') | Out-Null
             }
@@ -64,5 +77,10 @@ if ($Aircraft) {
     } finally {
         $zip.Dispose()
     }
-    Write-Host "Fertig: $aircraftZip"
+
+    for ($i = 0; $i -lt $parts.Count; $i++) {
+        $name = "SharedDeck-A32NX-part$($i + 1)of$($parts.Count).zip"
+        Move-Item $parts[$i] (Join-Path $dist $name)
+        Write-Host "Fertig: $name ($([math]::Round((Get-Item (Join-Path $dist $name)).Length / 1MB)) MB)"
+    }
 }
