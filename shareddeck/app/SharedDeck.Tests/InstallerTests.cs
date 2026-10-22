@@ -57,6 +57,33 @@ public sealed class InstallerTests : IDisposable
     }
 
     [Fact]
+    public void ProgressCoversAppModuleAndAircraftAndEndsAtOne()
+    {
+        var community = Directory.CreateDirectory(Path.Combine(root, "Community")).FullName;
+        var aircraftZip = Path.Combine(root, "SharedDeck-A32NX-part1of1.zip");
+        using (var zip = ZipFile.Open(aircraftZip, ZipArchiveMode.Create))
+        {
+            Write(zip, "flybywire-aircraft-a320-neo/big.bin", new string('x', 3 * 1024 * 1024));
+        }
+        var reports = new List<double>();
+
+        Installer.Install(Payload(), new InstallOptions
+        {
+            InstallDirectory = Path.Combine(root, "app"), CommunityFolder = community, AircraftZip = aircraftZip,
+            RegisterWithWindows = false,
+        }, log, new SynchronousProgress(reports.Add));
+
+        Assert.True(reports.Count >= 3, "a 3 MB file must report several steps");
+        Assert.Equal(reports.OrderBy(r => r), reports);
+        Assert.Equal(1.0, reports[^1]);
+    }
+
+    private sealed class SynchronousProgress(Action<double> report) : IProgress<double>
+    {
+        public void Report(double value) => report(value);
+    }
+
+    [Fact]
     public void AircraftReplacesExistingPackageWithBackup()
     {
         var community = Directory.CreateDirectory(Path.Combine(root, "Packages", "Community")).FullName;

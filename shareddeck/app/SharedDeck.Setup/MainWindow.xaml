@@ -74,7 +74,10 @@
 
         <Border Style="{StaticResource Card}" Margin="0">
             <DockPanel>
-                <ProgressBar x:Name="Progress" DockPanel.Dock="Top" Height="6" Margin="0,0,0,8" Visibility="Collapsed" IsIndeterminate="True" />
+                <DockPanel x:Name="ProgressPanel" DockPanel.Dock="Top" Margin="0,0,0,8" Visibility="Collapsed">
+                    <TextBlock x:Name="ProgressText" DockPanel.Dock="Right" Width="48" TextAlignment="Right" FontWeight="SemiBold" Text="0 %" />
+                    <ProgressBar x:Name="Progress" Height="14" Minimum="0" Maximum="100" Margin="0,0,8,0" />
+                </DockPanel>
                 <ListBox x:Name="LogList" BorderThickness="0" />
             </DockPanel>
         </Border>

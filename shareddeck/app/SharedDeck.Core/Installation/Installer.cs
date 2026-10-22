@@ -66,34 +66,56 @@ public static class Installer
     }
 
     /// <param name="payload">ZIP with "app/..." (the app) and "module/shareddeck-module/..." (the module)</param>
-    public static void Install(Stream payload, InstallOptions options, IProgress<string> log, CancellationToken token = default)
+    /// <param name="progress">overall progress 0..1, by bytes written</param>
+    public static void Install(Stream payload, InstallOptions options, IProgress<string> log, IProgress<double>? progress = null,
+        CancellationToken token = default)
     {
         Directory.CreateDirectory(options.InstallDirectory);
         using var archive = new ZipArchive(payload, ZipArchiveMode.Read);
+        var installModule = options.CommunityFolder != null && options.InstallModule;
+        var installAircraft = options.CommunityFolder != null && !string.IsNullOrEmpty(options.AircraftZip);
 
-        log.Report("Installiere die SharedDeck-App …");
-        ExtractPrefix(archive, "app/", options.InstallDirectory, token);
-
-        if (options.CommunityFolder != null && options.InstallModule)
+        // everything that will be written, so the progress covers the whole installation
+        var counter = new ProgressCounter(progress);
+        counter.AddTotal(EntriesWithPrefix(archive, "app/").Sum(e => e.Length));
+        if (installModule)
         {
-            log.Report("Installiere das SharedDeck-Modul in den Community-Ordner …");
-            var target = Path.Combine(options.CommunityFolder, ModulePackage);
-            if (Directory.Exists(target))
-            {
-                Directory.Delete(target, recursive: true);
-            }
-            ExtractPrefix(archive, $"module/{ModulePackage}/", target, token);
+            counter.AddTotal(EntriesWithPrefix(archive, $"module/{ModulePackage}/").Sum(e => e.Length));
         }
-
-        if (options.CommunityFolder != null && !string.IsNullOrEmpty(options.AircraftZip))
+        var aircraft = installAircraft ? FindAircraftParts(options.AircraftZip!).Select(ZipFile.OpenRead).ToList() : [];
+        try
         {
-            InstallAircraft(options.AircraftZip, options.CommunityFolder, log, token);
+            counter.AddTotal(aircraft.SelectMany(z => z.Entries).Sum(e => e.Length));
+
+            log.Report("Installiere die SharedDeck-App …");
+            ExtractPrefix(archive, "app/", options.InstallDirectory, counter, token);
+
+            if (installModule)
+            {
+                log.Report("Installiere das SharedDeck-Modul in den Community-Ordner …");
+                var target = Path.Combine(options.CommunityFolder!, ModulePackage);
+                if (Directory.Exists(target))
+                {
+                    Directory.Delete(target, recursive: true);
+                }
+                ExtractPrefix(archive, $"module/{ModulePackage}/", target, counter, token);
+            }
+
+            if (installAircraft)
+            {
+                InstallAircraft(aircraft, options.CommunityFolder!, log, counter, token);
+            }
+        }
+        finally
+        {
+            aircraft.ForEach(z => z.Dispose());
         }
 
         if (options.RegisterWithWindows)
         {
             Register(options, log);
         }
+        counter.Complete();
         log.Report("Fertig.");
     }
 
@@ -128,7 +150,7 @@ public static class Installer
         var zips = FindAircraftParts(zipPath).Select(ZipFile.OpenRead).ToList();
         try
         {
-            InstallAircraft(zips, communityFolder, log, token);
+            InstallAircraft(zips, communityFolder, log, new ProgressCounter(null), token);
         }
         finally
         {
@@ -136,7 +158,8 @@ public static class Installer
         }
     }
 
-    private static void InstallAircraft(List<ZipArchive> zips, string communityFolder, IProgress<string> log, CancellationToken token)
+    private static void InstallAircraft(List<ZipArchive> zips, string communityFolder, IProgress<string> log, ProgressCounter counter,
+        CancellationToken token)
     {
         var entries = zips.SelectMany(z => z.Entries).ToList();
         var packages = entries
@@ -163,30 +186,28 @@ public static class Installer
             }
         }
 
-        var total = entries.Count;
-        var done = 0;
         log.Report($"Entpacke das Flugzeug ({entries.Sum(e => e.Length) / 1024 / 1024} MB aus {zips.Count} Datei(en)) …");
         foreach (var entry in entries)
         {
             token.ThrowIfCancellationRequested();
-            ExtractEntry(entry, communityFolder, entry.FullName);
-            if (++done % 500 == 0)
-            {
-                log.Report($"Flugzeug: {done * 100 / total} %");
-            }
+            ExtractEntry(entry, communityFolder, entry.FullName, counter);
         }
     }
 
-    private static void ExtractPrefix(ZipArchive archive, string prefix, string targetDirectory, CancellationToken token)
+    private static IEnumerable<ZipArchiveEntry> EntriesWithPrefix(ZipArchive archive, string prefix) =>
+        archive.Entries.Where(e => e.FullName.StartsWith(prefix, StringComparison.Ordinal));
+
+    private static void ExtractPrefix(ZipArchive archive, string prefix, string targetDirectory, ProgressCounter counter,
+        CancellationToken token)
     {
-        foreach (var entry in archive.Entries.Where(e => e.FullName.StartsWith(prefix, StringComparison.Ordinal)))
+        foreach (var entry in EntriesWithPrefix(archive, prefix))
         {
             token.ThrowIfCancellationRequested();
-            ExtractEntry(entry, targetDirectory, entry.FullName[prefix.Length..]);
+            ExtractEntry(entry, targetDirectory, entry.FullName[prefix.Length..], counter);
         }
     }
 
-    private static void ExtractEntry(ZipArchiveEntry entry, string root, string relativePath)
+    private static void ExtractEntry(ZipArchiveEntry entry, string root, string relativePath, ProgressCounter counter)
     {
         // archives made by Windows PowerShell 5.1 use backslashes
         relativePath = relativePath.Replace('\\', '/');
@@ -206,7 +227,19 @@ public static class Installer
             return;
         }
         Directory.CreateDirectory(Path.GetDirectoryName(full)!);
-        entry.ExtractToFile(full, overwrite: true);
+        // copied in blocks, so the progress also moves during large files (textures, the app itself)
+        using (var source = entry.Open())
+        using (var target = File.Create(full))
+        {
+            var buffer = new byte[1024 * 1024];
+            int read;
+            while ((read = source.Read(buffer, 0, buffer.Length)) > 0)
+            {
+                target.Write(buffer, 0, read);
+                counter.Advance(read);
+            }
+        }
+        File.SetLastWriteTime(full, entry.LastWriteTime.DateTime);
     }
 
     private static void Register(InstallOptions options, IProgress<string> log)
@@ -232,7 +265,7 @@ public static class Installer
 
         using var key = Registry.CurrentUser.CreateSubKey(UninstallKey);
         key.SetValue("DisplayName", "SharedDeck – Shared Cockpit für MSFS 2024");
-        key.SetValue("DisplayVersion", "0.2.0");
+        key.SetValue("DisplayVersion", "0.2.1");
         key.SetValue("Publisher", "SharedDeck");
         key.SetValue("DisplayIcon", app);
         key.SetValue("InstallLocation", options.InstallDirectory);

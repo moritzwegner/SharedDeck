@@ -16,6 +16,8 @@ public partial class MainWindow : Window
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SharedDeck");
     private static readonly string ConfigPath = Path.Combine(ConfigDirectory, "shareddeck.json");
     public static readonly string LogDirectory = Path.Combine(ConfigDirectory, "logs");
+    /// <summary>The version from the project file, e.g. "0.2.1".</summary>
+    private static readonly string AppVersion = typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "?";
 
     private readonly SharedDeckConfig config;
     private readonly BridgeServer bridge;
@@ -25,9 +27,10 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        Title = $"SharedDeck {AppVersion} – Shared Cockpit";
 
         Directory.CreateDirectory(ConfigDirectory);
-        WriteLogFile($"===== {DateTime.Now:yyyy-MM-dd HH:mm:ss} SharedDeck {typeof(MainWindow).Assembly.GetName().Version?.ToString(3)} gestartet =====");
+        WriteLogFile($"===== {DateTime.Now:yyyy-MM-dd HH:mm:ss} SharedDeck {AppVersion} gestartet =====");
         config = SharedDeckConfig.Load(ConfigPath);
         AddressBox.Text = config.LastHostAddress;
         StrictBox.IsChecked = config.Strict;

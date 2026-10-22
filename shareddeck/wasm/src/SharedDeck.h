@@ -37,6 +37,10 @@ struct LVar {
   bool declaredLocal = false;
   bool inputDenied = false;
   uint32_t mismatchStreak = 0;
+  // client: RPN code to run whenever the host changes this variable (what FBW does on the host side)
+  std::string action;
+  double actionLast = 0;
+  bool actionToggled = false;  // odd number of runs during this session, undone when the session ends
 };
 
 struct AVar {
@@ -133,6 +137,8 @@ class SharedDeck {
   std::vector<std::string> inputDeny;
   std::vector<std::string> keyDeny;
   std::vector<std::string> localAllow;
+  std::unordered_map<std::string, std::string> lvarActions;
+  void runLvarAction(LVar& lvar);
 
   double time = 0;
   double lastEmitTime = -1;

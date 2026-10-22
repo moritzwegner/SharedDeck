@@ -17,11 +17,21 @@ public sealed class AVarEntry
     [JsonPropertyName("tolerance")] public double Tolerance { get; set; }
 }
 
+/// <summary>
+/// RPN code the client runs whenever the host changes an L:var, for native simulator state that
+/// FBW changes as a reaction to that variable (e.g. bus-to-bus connections).
+/// </summary>
+public sealed class LVarAction
+{
+    [JsonPropertyName("lvar")] public string LVar { get; set; } = "";
+    [JsonPropertyName("code")] public string Code { get; set; } = "";
+}
+
 /// <summary>All settings of SharedDeck. The host's sync settings are sent to the client on connect.</summary>
 public sealed class SharedDeckConfig
 {
     /// <summary>Raised whenever the default sync lists change, so older files are upgraded on load.</summary>
-    public const int CurrentVersion = 3;
+    public const int CurrentVersion = 4;
 
     [JsonPropertyName("configVersion")] public int ConfigVersion { get; set; }
     [JsonPropertyName("peerPort")] public int PeerPort { get; set; } = 51530;
@@ -47,6 +57,7 @@ public sealed class SharedDeckConfig
     /// <summary>H events of the client that are not forwarded.</summary>
     [JsonPropertyName("hEventDeny")] public List<string> HEventDeny { get; set; } = new();
     [JsonPropertyName("avars")] public List<AVarEntry> AVars { get; set; } = new();
+    [JsonPropertyName("lvarActions")] public List<LVarAction> LVarActions { get; set; } = new();
     /// <summary>A:vars that are only compared on demand (audit), to find what is still missing in "avars".</summary>
     [JsonPropertyName("auditAVars")] public List<AVarEntry> AuditAVars { get; set; } = new();
 
@@ -114,6 +125,7 @@ public sealed class SharedDeckConfig
         ["ebAllowClientToHost"] = ToArray(EbAllowClientToHost),
         ["hEventDeny"] = ToArray(HEventDeny),
         ["avars"] = JsonSerializer.SerializeToNode(AVars),
+        ["lvarActions"] = JsonSerializer.SerializeToNode(LVarActions),
         ["auditAVars"] = JsonSerializer.SerializeToNode(AuditAVars),
     };
 
@@ -130,6 +142,7 @@ public sealed class SharedDeckConfig
         EbAllowClientToHost = FromArray(settings["ebAllowClientToHost"]);
         HEventDeny = FromArray(settings["hEventDeny"]);
         AVars = settings["avars"].Deserialize<List<AVarEntry>>() ?? new();
+        LVarActions = settings["lvarActions"].Deserialize<List<LVarAction>>() ?? new();
         AuditAVars = settings["auditAVars"].Deserialize<List<AVarEntry>>() ?? new();
     }
 
@@ -148,6 +161,7 @@ public sealed class SharedDeckConfig
         {
             ["n"] = a.Name, ["u"] = a.Unit, ["i"] = a.Index, ["set"] = a.Setter, ["tol"] = a.Tolerance,
         }).ToArray()),
+        ["lvarActions"] = JsonSerializer.SerializeToNode(LVarActions),
     };
 
     private static JsonArray ToArray(IEnumerable<string> items) => new(items.Select(i => (JsonNode)JsonValue.Create(i)!).ToArray());
@@ -229,6 +243,14 @@ public sealed class SharedDeckConfig
             new() { Name = "KOHLSMAN SETTING MB", Unit = "millibars", Index = 1, IndexTo = 2, Setter = "{i} {v} 16 * near (>K:2:KOHLSMAN_SET)", Tolerance = 0.07 },
             new() { Name = "KOHLSMAN SETTING MB", Unit = "millibars", Index = 4, Setter = "{i} {v} 16 * near (>K:2:KOHLSMAN_SET)", Tolerance = 0.07 },
             new() { Name = "LIGHT POTENTIOMETER", Unit = "percent", Index = 1, IndexTo = 100, Setter = "{v} {i} (>K:2:LIGHT_POTENTIOMETER_SET)", Tolerance = 0.5 },
+            // native fuel system, APU and starters, which FBW switches with key events; before the circuits,
+            // because the circuits of valves (1-12, 75) and pumps (79) follow their state
+            new() { Name = "FUELSYSTEM VALVE SWITCH", Unit = "bool", Index = 1, IndexTo = 12, Setter = "{v} 0.5 > if{ {i} (>K:FUELSYSTEM_VALVE_OPEN) } els{ {i} (>K:FUELSYSTEM_VALVE_CLOSE) }" },
+            new() { Name = "FUELSYSTEM PUMP SWITCH", Unit = "enum", Index = 1, IndexTo = 7, Setter = "{v} 1.5 > if{ {v} {i} (>K:2:FUELSYSTEM_PUMP_SET) } els{ {v} 0.5 > if{ {i} (>K:FUELSYSTEM_PUMP_ON) } els{ {i} (>K:FUELSYSTEM_PUMP_OFF) } }" },
+            new() { Name = "APU SWITCH", Unit = "bool", Setter = "{v} 0.5 > if{ (A:APU SWITCH, bool) ! if{ 1 (>K:APU_STARTER) } } els{ (A:APU SWITCH, bool) if{ 1 (>K:APU_OFF_SWITCH) } }" },
+            new() { Name = "BLEED AIR APU", Unit = "bool", Setter = "{v} 0.5 > (>K:APU_BLEED_AIR_SOURCE_SET)" },
+            new() { Name = "GENERAL ENG STARTER", Unit = "bool", Index = 1, Setter = "{v} 0.5 > (>K:STARTER1_SET)" },
+            new() { Name = "GENERAL ENG STARTER", Unit = "bool", Index = 2, Setter = "{v} 0.5 > (>K:STARTER2_SET)" },
             new() { Name = "CIRCUIT SWITCH ON", Unit = "bool", Index = 1, IndexTo = 120, Setter = "(A:CIRCUIT SWITCH ON:{i}, bool) {v} != if{ {i} (>K:ELECTRICAL_CIRCUIT_TOGGLE) }" },
             new() { Name = "COM ACTIVE FREQUENCY", Unit = "hertz", Index = 1, Setter = "{v} near (>K:COM_RADIO_SET_HZ)" },
             new() { Name = "COM ACTIVE FREQUENCY", Unit = "hertz", Index = 2, Setter = "{v} near (>K:COM2_RADIO_SET_HZ)" },
@@ -245,6 +267,20 @@ public sealed class SharedDeckConfig
             new() { Name = "AMBIENT VISIBILITY", Unit = "meters", Tolerance = 2000 },
             new() { Name = "AMBIENT PRECIP STATE", Unit = "number" },
         },
+        // FBW (Rust electrical aspect) connects the always powered native bus 1 to the native bus of
+        // each FBW bus whenever that bus changes its powered state; the client does the same
+        LVarActions = new[]
+            {
+                ("AC_1", 2), ("AC_2", 3), ("AC_ESS", 4), ("AC_ESS_SHED", 5), ("AC_STAT_INV", 6), ("AC_GND_FLT_SVC", 14),
+                ("DC_1", 7), ("DC_2", 8), ("DC_ESS", 9), ("DC_ESS_SHED", 10), ("DC_BAT", 11), ("DC_HOT_1", 12), ("DC_HOT_2", 13),
+                ("DC_GND_FLT_SVC", 15),
+            }
+            .Select(bus => new LVarAction
+            {
+                LVar = $"A32NX_ELEC_{bus.Item1}_BUS_IS_POWERED",
+                Code = $"{bus.Item2} 1 (>K:2:ELECTRICAL_BUS_TO_BUS_CONNECTION_TOGGLE)",
+            })
+            .ToList(),
         AuditAVars =
         {
             new() { Name = "AIRSPEED INDICATED", Unit = "knots" },

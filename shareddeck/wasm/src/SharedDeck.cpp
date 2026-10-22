@@ -297,6 +297,13 @@ void SharedDeck::applyConfig(const json& config) {
   keyDeny = readList("keyDeny");
   localAllow = readList("localAllow");
 
+  lvarActions.clear();
+  if (config.contains("lvarActions") && config["lvarActions"].is_array()) {
+    for (const auto& item : config["lvarActions"]) {
+      lvarActions[item.value("lvar", "")] = item.value("code", "");
+    }
+  }
+
   avars.clear();
   if (config.contains("avars") && config["avars"].is_array()) {
     for (const auto& item : config["avars"]) {
@@ -390,9 +397,23 @@ void SharedDeck::startSession() {
   log("session started");
 }
 
+void SharedDeck::runLvarAction(LVar& lvar) {
+  expectOwnKeyEvents(lvar.action);
+  suppressKeyCapture = true;
+  execute_calculator_code(lvar.action.c_str(), nullptr, nullptr, nullptr);
+  suppressKeyCapture = false;
+  lvar.actionToggled = !lvar.actionToggled;
+}
+
 void SharedDeck::stopSession() {
   if (role == Role::Client) {
     setFreeze(false);
+    // FBW resumes with its own memory of these variables: undo our toggles so it toggles from the right state
+    for (auto& lvar : lvars) {
+      if (lvar.actionToggled) {
+        runLvarAction(lvar);
+      }
+    }
   }
   active = false;
   setRoleVariable(Role::Off);
@@ -817,6 +838,12 @@ void SharedDeck::clientApplyNames(const json& message) {
     lvar.lastLocal = lvar.value;
     lvar.declaredLocal = matchesAny(localAllow, lvar.name);
     lvar.inputDenied = matchesAny(inputDeny, lvar.name);
+    const auto action = lvarActions.find(lvar.name);
+    if (action != lvarActions.end()) {
+      // the local value matches the local simulator state, so changes are counted from here
+      lvar.action = action->second;
+      lvar.actionLast = lvar.value;
+    }
     lvarIndexByName[lvar.name] = static_cast<uint32_t>(lvars.size());
     lvars.push_back(lvar);
   }
@@ -862,6 +889,10 @@ void SharedDeck::clientApplyFrame(const json& message) {
       if (lvar.pendingInputSeq == 0 && !lvar.declaredLocal) {
         set_named_variable_value(lvar.localId, value);
         lvar.lastLocal = value;
+      }
+      if (!lvar.action.empty() && !sameBits(value, lvar.actionLast)) {
+        lvar.actionLast = value;
+        runLvarAction(lvar);
       }
     }
   }

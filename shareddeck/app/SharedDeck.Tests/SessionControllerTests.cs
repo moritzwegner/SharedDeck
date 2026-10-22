@@ -119,6 +119,12 @@ public class SessionControllerTests : IDisposable
         await Wait.Until(() => clientBridge.SentWasm("start").Any());
         var clientConfig = clientBridge.SentWasm("config").Single();
         Assert.Equal(Protocol.RoleClient, clientConfig["role"]!.GetValue<int>());
+        Assert.Contains(clientConfig["lvarActions"]!.AsArray(), a =>
+            a!["lvar"]!.GetValue<string>() == "A32NX_ELEC_AC_1_BUS_IS_POWERED" &&
+            a["code"]!.GetValue<string>() == "2 1 (>K:2:ELECTRICAL_BUS_TO_BUS_CONNECTION_TOGGLE)");
+        var avarNames = clientConfig["avars"]!.AsArray().Select(a => a!["n"]!.GetValue<string>()).ToList();
+        Assert.True(avarNames.IndexOf("FUELSYSTEM VALVE SWITCH") < avarNames.IndexOf("CIRCUIT SWITCH ON"),
+            "fuel valves must be applied before the circuits that follow them");
         Assert.Contains("VIEW*", clientConfig["keyDeny"]!.AsArray().Select(n => n!.GetValue<string>()));
         Assert.Equal(clientConfig["avars"]!.AsArray().Count, hostConfig["avars"]!.AsArray().Count);
     }

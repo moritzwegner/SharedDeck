@@ -15,6 +15,8 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        var version = typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "?";
+        Title = $"SharedDeck {version} Setup";
         uninstallMode = Environment.GetCommandLineArgs().Any(a => a.Equals("/uninstall", StringComparison.OrdinalIgnoreCase));
 
         if (uninstallMode)
@@ -75,15 +77,26 @@ public partial class MainWindow : Window
     private async void OnInstall(object sender, RoutedEventArgs e)
     {
         var progress = new Progress<string>(Log);
+        var percent = new Progress<double>(fraction =>
+        {
+            Progress.Value = fraction * 100;
+            ProgressText.Text = $"{fraction * 100:0} %";
+        });
         InstallButton.IsEnabled = false;
         CloseButton.IsEnabled = false;
         Form.IsEnabled = false;
-        Progress.Visibility = Visibility.Visible;
+        Progress.Value = 0;
+        ProgressText.Text = "0 %";
+        ProgressPanel.Visibility = Visibility.Visible;
         try
         {
             if (uninstallMode)
             {
+                Progress.IsIndeterminate = true;
+                ProgressText.Text = "";
                 await Task.Run(() => Installer.Uninstall(progress));
+                Progress.IsIndeterminate = false;
+                ProgressPanel.Visibility = Visibility.Collapsed;
                 return;
             }
 
@@ -113,7 +126,7 @@ public partial class MainWindow : Window
             {
                 using var payload = Assembly.GetExecutingAssembly().GetManifestResourceStream("payload.zip")
                                     ?? throw new InvalidOperationException("Dieses Setup enthält keine Programmdateien (Entwickler-Build).");
-                Installer.Install(payload, options, progress);
+                Installer.Install(payload, options, progress, percent);
             });
             installedApp = Path.Combine(options.InstallDirectory, Installer.AppExecutable);
             StartButton.Visibility = Visibility.Visible;
@@ -126,7 +139,7 @@ public partial class MainWindow : Window
         }
         finally
         {
-            Progress.Visibility = Visibility.Collapsed;
+            // the bar stays visible: 100 % when done, or where an error stopped the installation
             CloseButton.IsEnabled = true;
         }
     }
