@@ -1,0 +1,82 @@
+﻿<Window x:Class="SharedDeck.Setup.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="SharedDeck Setup" Width="680" Height="640" ResizeMode="CanMinimize"
+        Background="#F4F5F7" FontFamily="Segoe UI" FontSize="13" WindowStartupLocation="CenterScreen">
+    <Window.Resources>
+        <Style TargetType="Button">
+            <Setter Property="Padding" Value="14,6" />
+        </Style>
+        <Style x:Key="Hint" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#5F6B7A" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Margin" Value="0,2,0,0" />
+        </Style>
+        <Style x:Key="Card" TargetType="Border">
+            <Setter Property="Background" Value="White" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Padding" Value="14" />
+            <Setter Property="Margin" Value="0,0,0,12" />
+            <Setter Property="BorderBrush" Value="#DDE1E6" />
+            <Setter Property="BorderThickness" Value="1" />
+        </Style>
+    </Window.Resources>
+
+    <DockPanel Margin="18">
+        <StackPanel DockPanel.Dock="Top" Margin="0,0,0,14">
+            <TextBlock Text="SharedDeck installieren" FontSize="20" FontWeight="SemiBold" />
+            <TextBlock Style="{StaticResource Hint}"
+                       Text="Gemeinsam im Cockpit fliegen: installiert die SharedDeck-App, das SharedDeck-Modul für MSFS 2024 und auf Wunsch den SharedDeck-A32NX." />
+        </StackPanel>
+
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+            <Button x:Name="StartButton" Content="SharedDeck starten" Click="OnStartApp" Visibility="Collapsed" Margin="0,0,8,0" />
+            <Button x:Name="InstallButton" Content="Installieren" Click="OnInstall" IsDefault="True" Margin="0,0,8,0" />
+            <Button x:Name="CloseButton" Content="Schließen" Click="OnClose" />
+        </StackPanel>
+
+        <StackPanel x:Name="Form">
+            <Border Style="{StaticResource Card}">
+                <StackPanel>
+                    <TextBlock FontWeight="SemiBold" Text="Programmordner" />
+                    <DockPanel Margin="0,6,0,0">
+                        <Button DockPanel.Dock="Right" Content="…" Click="OnBrowseInstall" Margin="6,0,0,0" Padding="10,2" />
+                        <TextBox x:Name="InstallDirBox" Padding="4" />
+                    </DockPanel>
+                    <CheckBox x:Name="DesktopBox" Content="Verknüpfung auf dem Desktop" IsChecked="True" Margin="0,8,0,0" />
+                </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource Card}">
+                <StackPanel>
+                    <TextBlock FontWeight="SemiBold" Text="MSFS 2024 Community-Ordner" />
+                    <DockPanel Margin="0,6,0,0">
+                        <Button DockPanel.Dock="Right" Content="…" Click="OnBrowseCommunity" Margin="6,0,0,0" Padding="10,2" />
+                        <TextBox x:Name="CommunityBox" Padding="4" />
+                    </DockPanel>
+                    <TextBlock x:Name="CommunityHint" Style="{StaticResource Hint}" />
+                    <CheckBox x:Name="ModuleBox" Content="SharedDeck-Modul installieren (nötig)" IsChecked="True" Margin="0,8,0,0" />
+                </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource Card}">
+                <StackPanel>
+                    <TextBlock FontWeight="SemiBold" Text="SharedDeck-A32NX (optional)" />
+                    <TextBlock Style="{StaticResource Hint}"
+                               Text="Die ZIP-Datei mit dem Flugzeug bekommst du vom Host. Ein vorhandener FlyByWire A32NX wird nicht gelöscht, sondern in den Ordner „SharedDeck-Backup“ neben dem Community-Ordner verschoben." />
+                    <DockPanel Margin="0,6,0,0">
+                        <Button DockPanel.Dock="Right" Content="…" Click="OnBrowseAircraft" Margin="6,0,0,0" Padding="10,2" />
+                        <TextBox x:Name="AircraftBox" Padding="4" />
+                    </DockPanel>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+
+        <Border Style="{StaticResource Card}" Margin="0">
+            <DockPanel>
+                <ProgressBar x:Name="Progress" DockPanel.Dock="Top" Height="6" Margin="0,0,0,8" Visibility="Collapsed" IsIndeterminate="True" />
+                <ListBox x:Name="LogList" BorderThickness="0" />
+            </DockPanel>
+        </Border>
+    </DockPanel>
+</Window>

@@ -1,0 +1,4 @@
+# scripts run inside the Linux build container
+*.sh text eol=lf
+# applied with git am, must stay byte-exact
+*.patch -text

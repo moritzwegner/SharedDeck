@@ -1,0 +1,142 @@
+﻿<Window x:Class="SharedDeck.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="SharedDeck – Shared Cockpit" Width="900" Height="760" MinWidth="720" MinHeight="600"
+        Background="#F4F5F7" FontFamily="Segoe UI" FontSize="13">
+    <Window.Resources>
+        <Style TargetType="Button">
+            <Setter Property="Padding" Value="14,6" />
+            <Setter Property="Margin" Value="0,0,8,0" />
+        </Style>
+        <Style x:Key="Card" TargetType="Border">
+            <Setter Property="Background" Value="White" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Padding" Value="14" />
+            <Setter Property="Margin" Value="0,0,0,12" />
+            <Setter Property="BorderBrush" Value="#DDE1E6" />
+            <Setter Property="BorderThickness" Value="1" />
+        </Style>
+        <Style x:Key="Label" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#5F6B7A" />
+            <Setter Property="Margin" Value="0,2,12,2" />
+        </Style>
+        <Style x:Key="Value" TargetType="TextBlock">
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="0,2,24,2" />
+        </Style>
+    </Window.Resources>
+
+    <DockPanel Margin="16">
+        <!-- state banner -->
+        <Border x:Name="Banner" DockPanel.Dock="Top" CornerRadius="6" Padding="14,10" Margin="0,0,0,12" Background="#5F6B7A">
+            <StackPanel>
+                <TextBlock x:Name="StateText" Foreground="White" FontSize="18" FontWeight="SemiBold" Text="Nicht verbunden" />
+                <TextBlock x:Name="ReasonText" Foreground="White" TextWrapping="Wrap" Opacity="0.9" />
+            </StackPanel>
+        </Border>
+
+        <!-- connection -->
+        <Border DockPanel.Dock="Top" Style="{StaticResource Card}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="24" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <StackPanel>
+                    <TextBlock FontWeight="SemiBold" Text="Host (Kapitän, linker Sitz)" Margin="0,0,0,6" />
+                    <TextBlock Style="{StaticResource Label}" TextWrapping="Wrap"
+                               Text="Dein Simulator rechnet das Flugzeug. Der Co-Pilot verbindet sich mit deiner Adresse." />
+                    <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                        <Button x:Name="HostButton" Content="Als Host starten" Click="OnHost" />
+                        <CheckBox x:Name="StrictBox" Content="Strikter Modus" VerticalAlignment="Center" IsChecked="True"
+                                  ToolTip="An: jede nicht freigegebene Abweichung pausiert beide Simulatoren. Aus: Abweichungen werden nur gemeldet (Abstimmung)." />
+                    </StackPanel>
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+                    <TextBlock FontWeight="SemiBold" Text="Co-Pilot (rechter Sitz)" Margin="0,0,0,6" />
+                    <TextBlock Style="{StaticResource Label}" Text="Adresse des Hosts (IP, Tailscale-Name oder Hostname):" />
+                    <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                        <TextBox x:Name="AddressBox" Width="220" Padding="4" Margin="0,0,8,0" />
+                        <Button x:Name="ConnectButton" Content="Verbinden" Click="OnConnect" />
+                    </StackPanel>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- actions -->
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,12">
+            <Button x:Name="StopButton" Content="Trennen" Click="OnStop" />
+            <Button x:Name="ResumeButton" Content="Neu synchronisieren und fortsetzen" Click="OnResume" />
+            <Button x:Name="AuditButton" Content="A:Var-Audit" Click="OnAudit"
+                    ToolTip="Vergleicht zusätzliche Simulator-Variablen beider PCs, um fehlende Einträge in der Konfiguration zu finden." />
+            <Button x:Name="AdoptButton" Content="Lokale Variablen freigeben" Click="OnAdopt"
+                    ToolTip="Übernimmt die als lokal beschrieben gemeldeten Variablen in die Freigabeliste (Host, wirkt ab der nächsten Verbindung)." />
+            <Button Content="Konfiguration öffnen" Click="OnOpenConfig" />
+        </StackPanel>
+
+        <!-- status -->
+        <Border DockPanel.Dock="Top" Style="{StaticResource Card}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition /><RowDefinition /><RowDefinition /><RowDefinition /><RowDefinition />
+                </Grid.RowDefinitions>
+                <TextBlock Style="{StaticResource Label}" Text="Simulator" />
+                <TextBlock x:Name="BridgeText" Grid.Column="1" Style="{StaticResource Value}" />
+                <TextBlock Grid.Column="2" Style="{StaticResource Label}" Text="Gegenstelle" />
+                <TextBlock x:Name="PeerText" Grid.Column="3" Style="{StaticResource Value}" />
+                <TextBlock Grid.Row="1" Style="{StaticResource Label}" Text="Latenz (Hin und zurück)" />
+                <TextBlock x:Name="RttText" Grid.Row="1" Grid.Column="1" Style="{StaticResource Value}" />
+                <TextBlock Grid.Row="1" Grid.Column="2" Style="{StaticResource Label}" Text="Frames pro Sekunde" />
+                <TextBlock x:Name="FpsText" Grid.Row="1" Grid.Column="3" Style="{StaticResource Value}" />
+                <TextBlock Grid.Row="2" Style="{StaticResource Label}" Text="Datenrate (aus / ein)" />
+                <TextBlock x:Name="RateText" Grid.Row="2" Grid.Column="1" Style="{StaticResource Value}" />
+                <TextBlock Grid.Row="2" Grid.Column="2" Style="{StaticResource Label}" Text="Synchronisierte L:Vars" />
+                <TextBlock x:Name="LVarText" Grid.Row="2" Grid.Column="3" Style="{StaticResource Value}" />
+                <TextBlock Grid.Row="3" Style="{StaticResource Label}" Text="Letzte Prüfung" />
+                <TextBlock x:Name="VerifyText" Grid.Row="3" Grid.Column="1" Style="{StaticResource Value}" />
+                <TextBlock Grid.Row="3" Grid.Column="2" Style="{StaticResource Label}" Text="Gesendete Eingaben" />
+                <TextBlock x:Name="InputsText" Grid.Row="3" Grid.Column="3" Style="{StaticResource Value}" />
+                <TextBlock Grid.Row="4" Style="{StaticResource Label}" Text="Schubhebel steuert" />
+                <TextBlock x:Name="LeversText" Grid.Row="4" Grid.Column="1" Style="{StaticResource Value}" />
+            </Grid>
+        </Border>
+
+        <!-- details -->
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="12" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <Border Style="{StaticResource Card}">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Top" FontWeight="SemiBold" Text="Abweichungen" Margin="0,0,0,6" />
+                    <ListBox x:Name="MismatchList" BorderThickness="0" />
+                </DockPanel>
+            </Border>
+            <Border Grid.Column="2" Style="{StaticResource Card}">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Top" FontWeight="SemiBold" Text="Auf dem Co-Pilot-PC lokal beschrieben" Margin="0,0,0,6" />
+                    <ListBox x:Name="ContestedList" BorderThickness="0" />
+                </DockPanel>
+            </Border>
+            <Border Grid.Row="1" Grid.ColumnSpan="3" Style="{StaticResource Card}" Margin="0">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Top" FontWeight="SemiBold" Text="Protokoll" Margin="0,0,0,6" />
+                    <ListBox x:Name="LogList" BorderThickness="0" FontFamily="Consolas" FontSize="12" />
+                </DockPanel>
+            </Border>
+        </Grid>
+    </DockPanel>
+</Window>

@@ -1,0 +1,944 @@
+From 683b7503edeb4b5101f36b7208ef099fde559a4a Mon Sep 17 00:00:00 2001
+From: Moritz Wegner <moritzwegner46@gmail.com>
+Date: Thu, 22 Oct 2026 16:50:11 +0200
+Subject: [PATCH] feat: SharedDeck shared cockpit client mode
+
+With L:SHAREDDECK_ROLE = 1 (client) every computing layer stops and the
+state is mirrored from the host: Rust systems, cpp framework modules
+(FADEC, extra backend), fly-by-wire gauge, systems-host, TCAS, FMS/MCDU.
+
+- F/O sidestick inputs A32NX_SIDESTICK_FO_POSITION_X/Y into ELAC/SEC
+- client FMS adopts the host's flight plans, RPC served by the host
+- MCDU screen mirrored from the host, keyboard input forwarded
+- failures from the client's flyPad forwarded to the host
+- SharedDeck bridge (extras-host) between simulator and SharedDeck app
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ fbw-a32nx/src/systems/extras-host/index.ts    |  12 ++
+ .../modules/shareddeck/SharedDeckBridge.ts    | 173 ++++++++++++++++++
+ .../src/flightplanning/FlightPlanManager.ts   |   5 +-
+ .../src/flightplanning/MsfsFlightPlanSync.ts  |   6 +
+ .../flightplanning/rpc/FlightPlanRpcServer.ts |   6 +
+ .../src/systems/instruments/src/ATC/index.tsx |   6 +-
+ .../instruments/src/MCDU/McduFsInstrument.tsx |  10 +
+ .../MCDU/legacy/A320_Neo_CDU_MainDisplay.ts   | 126 ++++++++++++-
+ .../src/systems/shared/src/SharedDeck.ts      |  48 +++++
+ fbw-a32nx/src/systems/systems-host/index.ts   |   6 +
+ .../wasm/fbw_a320/src/FlyByWireInterface.cpp  |  18 +-
+ .../wasm/fbw_a320/src/FlyByWireInterface.h    |   5 +
+ .../src/interface/SimConnectInterface.cpp     |  16 ++
+ .../src/interface/SimConnectInterface.h       |   2 +
+ .../src/failures/failures-orchestrator.ts     |  38 +++-
+ .../MsfsHandler/MsfsHandler.cpp               |  10 +
+ .../MsfsHandler/MsfsHandler.h                 |   8 +
+ .../src/wasm/systems/systems_wasm/src/lib.rs  |  16 +-
+ 18 files changed, 502 insertions(+), 9 deletions(-)
+ create mode 100644 fbw-a32nx/src/systems/extras-host/modules/shareddeck/SharedDeckBridge.ts
+ create mode 100644 fbw-a32nx/src/systems/shared/src/SharedDeck.ts
+
+diff --git a/fbw-a32nx/src/systems/extras-host/index.ts b/fbw-a32nx/src/systems/extras-host/index.ts
+index 3548f5c..4dbeaea 100644
+--- a/fbw-a32nx/src/systems/extras-host/index.ts
++++ b/fbw-a32nx/src/systems/extras-host/index.ts
+@@ -28,6 +28,8 @@ import { VersionCheck } from './modules/version_check/VersionCheck';
+ import { AircraftSync } from './modules/aircraft_sync/AircraftSync';
+ import { LightSync } from './modules/light_sync/LightSync';
+ import { A32NXEcpBusPublisher } from '../shared/src/publishers/A32NXEcpBusPublisher';
++import { SharedDeckBridge } from './modules/shareddeck/SharedDeckBridge';
++import { SharedDeck } from '@shared/SharedDeck';
+ 
+ /**
+  * This is the main class for the extras-host instrument.
+@@ -107,6 +109,8 @@ class ExtrasHost extends BaseInstrument {
+ 
+   private readonly gsxSync = new GsxSyncA32NX(this.bus);
+ 
++  private readonly sharedDeckBridge = new SharedDeckBridge(this.bus);
++
+   /**
+    * "mainmenu" = 0
+    * "loading" = 1
+@@ -177,6 +181,7 @@ class ExtrasHost extends BaseInstrument {
+     this.aircraftSync.connectedCallback();
+ 
+     this.backplane.init();
++    this.sharedDeckBridge.init();
+ 
+     this.baroUnitSelector.performSelection();
+   }
+@@ -204,6 +209,13 @@ class ExtrasHost extends BaseInstrument {
+     this.versionCheck.update();
+     this.aircraftSync.update();
+ 
++    // SharedDeck client: everything is mirrored from the host, only the pilot's own seat stays local
++    if (SharedDeck.isClient()) {
++      this.clock.onUpdate();
++      this.pilotSeatManager.onUpdate();
++      return;
++    }
++
+     this.backplane.onUpdate();
+   }
+ }
+diff --git a/fbw-a32nx/src/systems/extras-host/modules/shareddeck/SharedDeckBridge.ts b/fbw-a32nx/src/systems/extras-host/modules/shareddeck/SharedDeckBridge.ts
+new file mode 100644
+index 0000000..1d47247
+--- /dev/null
++++ b/fbw-a32nx/src/systems/extras-host/modules/shareddeck/SharedDeckBridge.ts
+@@ -0,0 +1,173 @@
++// Copyright (c) 2026 FlyByWire Simulations
++// SPDX-License-Identifier: GPL-3.0
++
++import { EventBus, HEvent, Instrument } from '@microsoft/msfs-sdk';
++import { AircraftGithubVersionChecker } from '@flybywiresim/fbw-sdk';
++
++interface GenericDataListener extends ViewListener.ViewListener {
++  onDataReceived(key: string, callback: (data: any) => void): void;
++  send(key: string, data: any): void;
++}
++
++declare function RegisterGenericDataListener(callback?: () => void): GenericDataListener;
++
++interface EventBusPackage {
++  busId?: number;
++  packagedId: number;
++  data: { topic: string; data: unknown; isCached?: boolean }[];
++}
++
++type BridgeMode = 'off' | 'host' | 'client';
++
++/**
++ * Connects this simulator to the SharedDeck app (shared cockpit).
++ *
++ * - relays messages between the SharedDeck WASM module (CommBus) and the app (WebSocket)
++ * - mirrors the EventBus sync channels between the instruments of host and client, so data that
++ *   only exists in JS (flight plan, ND symbols, MCDU screen) reaches the client
++ * - forwards the H events of the client pilot to the host, where they are executed
++ */
++export class SharedDeckBridge implements Instrument {
++  private static readonly URL = 'ws://127.0.0.1:8391/';
++
++  private static readonly RECONNECT_INTERVAL_MS = 5000;
++
++  /** msfs-sdk EventBus sync and the FBW GenericDataListenerSync channel (ND symbols, failures, TCAS) */
++  private static readonly EVENT_BUS_KEYS = ['wt.eb.evt', 'EB_EVENTS'];
++
++  private static readonly MAX_REMEMBERED_PACKAGES = 512;
++
++  private readonly busId = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
++
++  private readonly injectedPackages = new Set<number>();
++
++  private readonly injectedOrder: number[] = [];
++
++  private socket: WebSocket | null = null;
++
++  private mode: BridgeMode = 'off';
++
++  private buildVersion = 'unknown';
++
++  private commBus: ViewListener.ViewListener | null = null;
++
++  private dataListener: GenericDataListener | null = null;
++
++  constructor(private readonly bus: EventBus) {}
++
++  public init(): void {
++    AircraftGithubVersionChecker.getBuildInfo('a32nx')
++      .then((info) => (this.buildVersion = `${info.version}+${info.sha.substring(0, 8)}`))
++      .catch(() => (this.buildVersion = 'unknown'))
++      .finally(() => this.connect());
++
++    this.commBus = RegisterViewListener('JS_LISTENER_COMM_BUS', undefined, false);
++    this.commBus.on('SHAREDDECK_FROM_WASM', (data: string) => this.send({ ch: 'wasm', d: data }));
++
++    const dataListener = RegisterGenericDataListener(() => {
++      for (const key of SharedDeckBridge.EVENT_BUS_KEYS) {
++        dataListener.onDataReceived(key, (data: EventBusPackage) => this.onEventBusPackage(key, data));
++      }
++    });
++    this.dataListener = dataListener;
++
++    this.bus
++      .getSubscriber<HEvent>()
++      .on('hEvent')
++      .handle((name) => {
++        if (this.mode === 'client') {
++          this.send({ ch: 'h', n: name });
++        }
++      });
++  }
++
++  public onUpdate(): void {
++    // event driven
++  }
++
++  private connect(): void {
++    const socket = new WebSocket(SharedDeckBridge.URL);
++    this.socket = socket;
++    socket.onopen = () => {
++      this.send({ ch: 'bridge', version: this.buildVersion, aircraft: SimVar.GetSimVarValue('TITLE', 'string') });
++    };
++    socket.onmessage = (event) => this.onAppMessage(String(event.data));
++    socket.onclose = () => {
++      this.socket = null;
++      this.mode = 'off';
++      setTimeout(() => this.connect(), SharedDeckBridge.RECONNECT_INTERVAL_MS);
++    };
++    socket.onerror = () => {
++      // onclose follows and reconnects; the app is not always running
++    };
++  }
++
++  private send(message: object): void {
++    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
++      this.socket.send(JSON.stringify(message));
++    }
++  }
++
++  private onAppMessage(text: string): void {
++    let message: any;
++    try {
++      message = JSON.parse(text);
++    } catch {
++      return;
++    }
++
++    switch (message.ch) {
++      case 'wasm':
++        Coherent.call('COMM_BUS_WASM_CALLBACK', 'SHAREDDECK_TO_WASM', message.d);
++        break;
++      case 'eb':
++        this.injectEventBusPackage(message.k, message.pkg);
++        break;
++      case 'h':
++        // an H event of the client pilot, executed here on the host
++        if (this.mode === 'host') {
++          SimVar.SetSimVarValue(`H:${message.n}`, 'number', 0);
++        }
++        break;
++      case 'mode':
++        this.mode = message.role;
++        break;
++      case 'resync':
++        // all instruments publish their cached synced events again, and the FMS its full flight plans,
++        // so a new client gets the full state
++        this.bus.pub('event_bus', 'resync_request', true, false);
++        this.bus.pub('flightPlanManager.syncRequest', undefined, true, false);
++        // the failures orchestrator (flyPad) broadcasts its active failures on request
++        this.injectEventBusPackage('EB_EVENTS', {
++          packagedId: 0,
++          data: [{ topic: 'FBW_FAILURE_REQUEST', data: undefined }],
++        });
++        break;
++    }
++  }
++
++  private onEventBusPackage(key: string, eventBusPackage: EventBusPackage): void {
++    if (this.mode === 'off' || !eventBusPackage || this.injectedPackages.has(eventBusPackage.packagedId)) {
++      return;
++    }
++    this.send({ ch: 'eb', k: key, pkg: eventBusPackage });
++  }
++
++  private injectEventBusPackage(key: string, eventBusPackage: EventBusPackage): void {
++    if (this.mode === 'off' || !this.dataListener || !SharedDeckBridge.EVENT_BUS_KEYS.includes(key)) {
++      return;
++    }
++    // a new identity so the receiving buses neither drop it as their own nor as a duplicate
++    eventBusPackage.packagedId = Math.floor(Math.random() * 1000000000);
++    if (eventBusPackage.busId !== undefined) {
++      eventBusPackage.busId = this.busId;
++    }
++    this.injectedPackages.add(eventBusPackage.packagedId);
++    this.injectedOrder.push(eventBusPackage.packagedId);
++    const forgotten = this.injectedOrder.length > SharedDeckBridge.MAX_REMEMBERED_PACKAGES ? this.injectedOrder.shift() : undefined;
++    if (forgotten !== undefined) {
++      this.injectedPackages.delete(forgotten);
++    }
++    this.dataListener.send(key, eventBusPackage);
++  }
++}
+diff --git a/fbw-a32nx/src/systems/fmgc/src/flightplanning/FlightPlanManager.ts b/fbw-a32nx/src/systems/fmgc/src/flightplanning/FlightPlanManager.ts
+index f0e00a0..de1f8ba 100644
+--- a/fbw-a32nx/src/systems/fmgc/src/flightplanning/FlightPlanManager.ts
++++ b/fbw-a32nx/src/systems/fmgc/src/flightplanning/FlightPlanManager.ts
+@@ -28,6 +28,7 @@ import { FlightPlanPerformanceData } from '@fmgc/flightplanning/plans/performanc
+ import { FlightPlanUtils } from './FlightPlanUtils';
+ import { FlightPlanBatch, FlightPlanBatchUtils } from '@fmgc/flightplanning/plans/FlightPlanBatch';
+ import { FlightPlanFlags } from './plans/FlightPlanFlags';
++import { SharedDeck } from '@shared/SharedDeck';
+ import { FpmConfig } from './FpmConfig';
+ 
+ export enum FlightPlanIndex {
+@@ -98,7 +99,9 @@ export class FlightPlanManager<P extends FlightPlanPerformanceData> {
+     // TODO handle this in the event queue
+     this.subs.push(
+       sub.on('flightPlanManager.syncResponse').handle(async (event) => {
+-        if (!this.ignoreSync && this.syncClientID === event.syncClientID) {
++        // SharedDeck client: the FMS of this simulator follows the host's FMS and adopts its full state
++        const adoptFromSharedDeckHost = this.master && SharedDeck.isClient() && this.syncClientID !== event.syncClientID;
++        if (!this.ignoreSync && (this.syncClientID === event.syncClientID || adoptFromSharedDeckHost)) {
+           for (const [index, serialisedPlan] of Object.entries(event.plans)) {
+             const intIndex = parseInt(index);
+ 
+diff --git a/fbw-a32nx/src/systems/fmgc/src/flightplanning/MsfsFlightPlanSync.ts b/fbw-a32nx/src/systems/fmgc/src/flightplanning/MsfsFlightPlanSync.ts
+index 2bb4a9d..cde53dc 100644
+--- a/fbw-a32nx/src/systems/fmgc/src/flightplanning/MsfsFlightPlanSync.ts
++++ b/fbw-a32nx/src/systems/fmgc/src/flightplanning/MsfsFlightPlanSync.ts
+@@ -23,6 +23,7 @@ import { FlightPlanIndex } from '@fmgc/flightplanning/FlightPlanManager';
+ import { NavigationDatabaseService } from '@fmgc/flightplanning/NavigationDatabaseService';
+ import { DataManager, PilotWaypointType } from '@fmgc/flightplanning/DataManager';
+ import { FlightPlanInterface } from '@fmgc/flightplanning/FlightPlanInterface';
++import { SharedDeck } from '@shared/SharedDeck';
+ import {
+   JS_ApproachIdentifier,
+   JS_EnrouteLeg,
+@@ -124,6 +125,11 @@ export class MsfsFlightPlanSync {
+   }
+ 
+   private handleSimRouteSent = async (route?: JS_FlightPlanRoute): Promise<void> => {
++    // SharedDeck client: the flight plan comes from the host's FMS
++    if (SharedDeck.isClient()) {
++      return;
++    }
++
+     route ??= await this.getSimRoute();
+ 
+     if (route.departureAirport.ident === '' || route.destinationAirport.ident === '') {
+diff --git a/fbw-a32nx/src/systems/fmgc/src/flightplanning/rpc/FlightPlanRpcServer.ts b/fbw-a32nx/src/systems/fmgc/src/flightplanning/rpc/FlightPlanRpcServer.ts
+index dfe93b8..ce2b6e1 100644
+--- a/fbw-a32nx/src/systems/fmgc/src/flightplanning/rpc/FlightPlanRpcServer.ts
++++ b/fbw-a32nx/src/systems/fmgc/src/flightplanning/rpc/FlightPlanRpcServer.ts
+@@ -8,6 +8,7 @@ import { EventBus, GameStateProvider, Publisher, Subscription } from '@microsoft
+ import { FlightPlanRemoteClientRpcEvents } from '@fmgc/flightplanning/rpc/FlightPlanRpcClient';
+ import { FlightPlanService } from '@fmgc/flightplanning/FlightPlanService';
+ import { FlightPlanPerformanceData } from '@fmgc/flightplanning/plans/performance/FlightPlanPerformanceData';
++import { SharedDeck } from '@shared/SharedDeck';
+ 
+ export interface FlightPlanServerRpcEvents {
+   flightPlanServer_heartbeat: void;
+@@ -54,6 +55,11 @@ export class FlightPlanRpcServer<P extends FlightPlanPerformanceData = FlightPla
+   }
+ 
+   private async handleRpcCommand(command: string, id: string, ...args: any): Promise<void> {
++    // SharedDeck client: the command is forwarded to the host's FMS, which answers it
++    if (SharedDeck.isClient()) {
++      return;
++    }
++
+     try {
+       const returnValue = await this.localFlightPlanService[command](...(args as any[]));
+ 
+diff --git a/fbw-a32nx/src/systems/instruments/src/ATC/index.tsx b/fbw-a32nx/src/systems/instruments/src/ATC/index.tsx
+index 3df1eef..7a3be8c 100644
+--- a/fbw-a32nx/src/systems/instruments/src/ATC/index.tsx
++++ b/fbw-a32nx/src/systems/instruments/src/ATC/index.tsx
+@@ -7,6 +7,7 @@ import React, { useCallback, useEffect, useState } from 'react';
+ import { useSimVar, useSplitSimVar, useInteractionEvent, useUpdate } from '@flybywiresim/fbw-sdk-react';
+ import { TcasComputer } from '@tcas/index';
+ import { render } from '@instruments/common/index';
++import { SharedDeck } from '@shared/SharedDeck';
+ 
+ import './style.scss';
+ 
+@@ -45,7 +46,10 @@ const PoweredXpdrDisplay = () => {
+ 
+   const updateCallback = useCallback(
+     (deltaTime) => {
+-      TcasComputer.update(deltaTime);
++      // SharedDeck client: TCAS is computed by the host (with the host's traffic) and mirrored
++      if (!SharedDeck.isClient()) {
++        TcasComputer.update(deltaTime);
++      }
+       if (displayResetTimer > 0) {
+         setDisplayResetTimer(Math.max(displayResetTimer - deltaTime / 1000, 0));
+       }
+diff --git a/fbw-a32nx/src/systems/instruments/src/MCDU/McduFsInstrument.tsx b/fbw-a32nx/src/systems/instruments/src/MCDU/McduFsInstrument.tsx
+index e5c185b..6677d6b 100644
+--- a/fbw-a32nx/src/systems/instruments/src/MCDU/McduFsInstrument.tsx
++++ b/fbw-a32nx/src/systems/instruments/src/MCDU/McduFsInstrument.tsx
+@@ -19,6 +19,7 @@ import { A320_Neo_CDU_MainDisplay } from './legacy/A320_Neo_CDU_MainDisplay';
+ import { EnginePublisher, RegisteredSimVar } from '@flybywiresim/fbw-sdk';
+ import { A32NXFcuBusPublisher } from '@shared/publishers/A32NXFcuBusPublisher';
+ import { A32NXFgBusPublisher } from '@shared/publishers/A32NXFGBusPublisher';
++import { SharedDeck } from '@shared/SharedDeck';
+ 
+ export class McduFsInstrument implements FsInstrument {
+   private static readonly INIT_DURATION = 1000;
+@@ -86,7 +87,16 @@ export class McduFsInstrument implements FsInstrument {
+     const monotonicTime = this.monotonicSimTimeVar.get() * 1000;
+     const deltaTime = monotonicTime - this.lastTime;
+     this.lastTime = monotonicTime;
++
++    // SharedDeck client: the FMS runs on the host, this MCDU only shows the host's screen
++    if (SharedDeck.isClient()) {
++      return;
++    }
++
+     this.legacyFms.onUpdate(deltaTime);
++    if (SharedDeck.isHost()) {
++      this.legacyFms.publishSharedDeckScreen(deltaTime);
++    }
+   }
+ 
+   /** @inheritdoc */
+diff --git a/fbw-a32nx/src/systems/instruments/src/MCDU/legacy/A320_Neo_CDU_MainDisplay.ts b/fbw-a32nx/src/systems/instruments/src/MCDU/legacy/A320_Neo_CDU_MainDisplay.ts
+index 27f9232..efc971f 100644
+--- a/fbw-a32nx/src/systems/instruments/src/MCDU/legacy/A320_Neo_CDU_MainDisplay.ts
++++ b/fbw-a32nx/src/systems/instruments/src/MCDU/legacy/A320_Neo_CDU_MainDisplay.ts
+@@ -21,6 +21,12 @@ import { LegacyAtsuPageInterface } from './LegacyAtsuPageInterface';
+ import { EngineOutTargetPage } from '@fmgc/events/EngineOutEvents';
+ import { CDUFlightPlanPage } from '../legacy_pages/A320_Neo_CDU_FlightPlanPage';
+ import { CDUPerformancePage } from '../legacy_pages/A320_Neo_CDU_PerformancePage';
++import {
++  SHAREDDECK_MCDU_SCREEN_TOPIC,
++  SharedDeck,
++  SharedDeckMcduEvents,
++  SharedDeckMcduScreen,
++} from '@shared/SharedDeck';
+ 
+ export class A320_Neo_CDU_MainDisplay
+   extends FMCMainDisplay
+@@ -30,6 +36,8 @@ export class A320_Neo_CDU_MainDisplay
+   private static readonly MAX_BRIGHTNESS = 8;
+ 
+   private static readonly H_EVENT_PREFIX = 'A320_Neo_CDU_';
++  /** '-' on the main keyboard, missing in the KeyCode typings */
++  private static readonly KEY_CODE_DASH = 189;
+ 
+   private readonly minPageUpdateThrottler = new UpdateThrottler(100);
+   private readonly mcduServerConnectUpdateThrottler = new UpdateThrottler(1000);
+@@ -49,6 +57,8 @@ export class A320_Neo_CDU_MainDisplay
+   private _scratchpad = null;
+   private scratchpads?: Record<'MCDU' | 'FMGC' | 'ATSU' | 'AIDS' | 'CFDS', ScratchpadDataLink>;
+   private _arrows = [false, false, false, false];
++  private sharedDeckLastScreen = '';
++  private readonly sharedDeckPublishThrottler = new UpdateThrottler(100);
+ 
+   private annunciators = {
+     left: {
+@@ -312,14 +322,115 @@ export class A320_Neo_CDU_MainDisplay
+       .getSubscriber<HEvent>()
+       .on('hEvent')
+       .handle((ev) => {
+-        if (ev.startsWith(A320_Neo_CDU_MainDisplay.H_EVENT_PREFIX)) {
++        // SharedDeck client: key presses are executed by the host's MCDU, whose screen is shown here
++        if (ev.startsWith(A320_Neo_CDU_MainDisplay.H_EVENT_PREFIX) && !SharedDeck.isClient()) {
+           this.onEvent(ev.slice(A320_Neo_CDU_MainDisplay.H_EVENT_PREFIX.length));
+         }
+       });
+ 
++    this.bus
++      .getSubscriber<SharedDeckMcduEvents>()
++      .on(SHAREDDECK_MCDU_SCREEN_TOPIC)
++      .handle((screen) => {
++        if (SharedDeck.isClient()) {
++          this.applySharedDeckScreen(screen);
++        }
++      });
++
+     this.Init();
+   }
+ 
++  /**
++   * SharedDeck host: publishes the screen content (at most every 100 ms, only when changed) for the client's MCDU.
++   * @param deltaTime time since the last update in ms
++   */
++  public publishSharedDeckScreen(deltaTime: number) {
++    if (this.sharedDeckPublishThrottler.canUpdate(deltaTime) === -1 || !this._titleElement) {
++      return;
++    }
++    const screen: SharedDeckMcduScreen = {
++      title: this._title ?? '',
++      pageCurrent: this._pageCurrent ?? 0,
++      pageCount: this._pageCount ?? 0,
++      labels: this._labelElements.map((row, i) => row.map((_, j) => this._labels[i]?.[j] ?? '')),
++      labelClasses: this._labelElements.map((row) => row.map((element) => element.className)),
++      lines: this._lineElements.map((row, i) => row.map((_, j) => this._lines[i]?.[j] ?? '')),
++      lineClasses: this._lineElements.map((row) => row.map((element) => element.className)),
++      scratchpadText: this.scratchpadDisplay.getText() ?? '',
++      scratchpadColor: this.scratchpadDisplay.getColor(),
++      arrows: [...this._arrows],
++    };
++    const serialized = JSON.stringify(screen);
++    if (serialized !== this.sharedDeckLastScreen) {
++      this.sharedDeckLastScreen = serialized;
++      this.bus.getPublisher<SharedDeckMcduEvents>().pub(SHAREDDECK_MCDU_SCREEN_TOPIC, screen, true, true);
++    }
++  }
++
++  /** Maps a key of the PC keyboard to the MCDU button it stands for (SharedDeck client). */
++  private static sharedDeckKeyboardButton(keyCode: number): string | undefined {
++    if (keyCode >= KeyCode.KEY_A && keyCode <= KeyCode.KEY_Z) {
++      return String.fromCharCode(keyCode);
++    }
++    if (keyCode >= KeyCode.KEY_0 && keyCode <= KeyCode.KEY_9) {
++      return String.fromCharCode(keyCode);
++    }
++    if (keyCode >= KeyCode.KEY_NUMPAD0 && keyCode <= KeyCode.KEY_NUMPAD9) {
++      return String(keyCode - KeyCode.KEY_NUMPAD0);
++    }
++    switch (keyCode) {
++      case KeyCode.KEY_SPACE:
++        return 'SP';
++      case KeyCode.KEY_SLASH:
++      case KeyCode.KEY_DIVIDE:
++        return 'DIV';
++      case KeyCode.KEY_PERIOD:
++      case KeyCode.KEY_DECIMAL:
++        return 'DOT';
++      case KeyCode.KEY_SUBTRACT:
++      case KeyCode.KEY_ADD:
++      case A320_Neo_CDU_MainDisplay.KEY_CODE_DASH:
++        return 'PLUSMINUS';
++      case KeyCode.KEY_BACK_SPACE:
++      case KeyCode.KEY_DELETE:
++        return 'CLR';
++      default:
++        return undefined;
++    }
++  }
++
++  /** SharedDeck client: renders the screen content of the host's MCDU. */
++  private applySharedDeckScreen(screen: SharedDeckMcduScreen) {
++    if (!this._titleElement) {
++      return;
++    }
++    const render = (element: HTMLElement, markup: string, className?: string) => {
++      if (className !== undefined) {
++        element.className = className;
++      }
++      element.textContent = markup;
++      element.innerHTML = this._formatCell(element.innerHTML);
++    };
++
++    this._title = screen.title;
++    render(this._titleElement, screen.title);
++    this.setPageCurrent(screen.pageCurrent);
++    this.setPageCount(screen.pageCount);
++    for (let i = 0; i < this._labelElements.length; i++) {
++      this._labels[i] = [];
++      this._lines[i] = [];
++      for (let j = 0; j < this._labelElements[i].length; j++) {
++        this._labels[i][j] = screen.labels[i]?.[j] ?? '';
++        this._lines[i][j] = screen.lines[i]?.[j] ?? '';
++        render(this._labelElements[i][j], this._labels[i][j], screen.labelClasses[i]?.[j]);
++        render(this._lineElements[i][j], this._lines[i][j], screen.lineClasses[i]?.[j]);
++      }
++    }
++    this.scratchpadDisplay.write(screen.scratchpadText, screen.scratchpadColor);
++    const [up, down, left, right] = screen.arrows;
++    this.setArrows(up, down, left, right);
++  }
++
+   // The callback is called when an event is received from the McduServerClient's socket.
+   // See https://developer.mozilla.org/en-US/docs/Web/API/WebSocket#events for possible events.
+   // This will be used as a parameter when the McduServerClient's connect method is called.
+@@ -1174,6 +1285,19 @@ export class A320_Neo_CDU_MainDisplay
+       }
+     });
+     window.document.addEventListener('keydown', (e) => {
++      // SharedDeck client: typed keys become key presses on the F/O MCDU, which the host executes
++      if (this.inFocus && SharedDeck.isClient()) {
++        this.lastInput = new Date();
++        if (e.altKey || (e.ctrlKey && e.keyCode === KeyCode.KEY_Z)) {
++          this.clearFocus();
++          return;
++        }
++        const button = A320_Neo_CDU_MainDisplay.sharedDeckKeyboardButton(e.keyCode);
++        if (button) {
++          SimVar.SetSimVarValue(`H:${A320_Neo_CDU_MainDisplay.H_EVENT_PREFIX}2_BTN_${button}`, 'number', 0);
++        }
++        return;
++      }
+       // MCDU should not accept input while unpowered
+       if (this.inFocus && SimVar.GetSimVarValue('L:A32NX_ELEC_AC_ESS_SHED_BUS_IS_POWERED', 'Number')) {
+         let keycode = e.keyCode;
+diff --git a/fbw-a32nx/src/systems/shared/src/SharedDeck.ts b/fbw-a32nx/src/systems/shared/src/SharedDeck.ts
+new file mode 100644
+index 0000000..6cc8fe4
+--- /dev/null
++++ b/fbw-a32nx/src/systems/shared/src/SharedDeck.ts
+@@ -0,0 +1,48 @@
++// Copyright (c) 2026 FlyByWire Simulations
++// SPDX-License-Identifier: GPL-3.0
++
++/**
++ * Role of this simulator in a SharedDeck shared cockpit session, set by the SharedDeck module.
++ * On the client every system is computed by the host and mirrored into this simulator, so
++ * components that compute state must not run there.
++ */
++export enum SharedDeckRole {
++  Off = 0,
++  Client = 1,
++  Host = 2,
++}
++
++export class SharedDeck {
++  public static role(): SharedDeckRole {
++    return SimVar.GetSimVarValue('L:SHAREDDECK_ROLE', 'number') ?? SharedDeckRole.Off;
++  }
++
++  public static isClient(): boolean {
++    return SharedDeck.role() === SharedDeckRole.Client;
++  }
++
++  public static isHost(): boolean {
++    return SharedDeck.role() === SharedDeckRole.Host;
++  }
++}
++
++/** EventBus topic with the MCDU screen content of the host, rendered by the client MCDU. */
++export const SHAREDDECK_MCDU_SCREEN_TOPIC = 'shareddeck_mcdu_screen';
++
++export interface SharedDeckMcduScreen {
++  title: string;
++  pageCurrent: number;
++  pageCount: number;
++  /** [row][column] markup strings and class names */
++  labels: string[][];
++  labelClasses: string[][];
++  lines: string[][];
++  lineClasses: string[][];
++  scratchpadText: string;
++  scratchpadColor: string;
++  arrows: boolean[];
++}
++
++export interface SharedDeckMcduEvents {
++  [SHAREDDECK_MCDU_SCREEN_TOPIC]: SharedDeckMcduScreen;
++}
+diff --git a/fbw-a32nx/src/systems/systems-host/index.ts b/fbw-a32nx/src/systems/systems-host/index.ts
+index a83cc2b..68b25e8 100644
+--- a/fbw-a32nx/src/systems/systems-host/index.ts
++++ b/fbw-a32nx/src/systems/systems-host/index.ts
+@@ -27,6 +27,7 @@ import { FakeDmc } from './systems/ECP/FakeDmc';
+ import { FwsManager } from './systems/FWC/FwsManager';
+ import { DmcSdPageLogic } from './systems/DmcSdPageLogic/DmcSdPageLogic';
+ import { A32NXFacBusPublisher } from '../shared/src/publishers/A32NXFacBusPublisher';
++import { SharedDeck } from '../shared/src/SharedDeck';
+ 
+ class SystemsHost extends BaseInstrument {
+   private readonly bus = new EventBus();
+@@ -127,6 +128,11 @@ class SystemsHost extends BaseInstrument {
+   public Update(): void {
+     super.Update();
+ 
++    // SharedDeck client: these systems are computed by the host and mirrored into this simulator
++    if (SharedDeck.isClient()) {
++      return;
++    }
++
+     this.backplane.onUpdate();
+   }
+ }
+diff --git a/fbw-a32nx/src/wasm/fbw_a320/src/FlyByWireInterface.cpp b/fbw-a32nx/src/wasm/fbw_a320/src/FlyByWireInterface.cpp
+index e9cde69..3384a06 100644
+--- a/fbw-a32nx/src/wasm/fbw_a320/src/FlyByWireInterface.cpp
++++ b/fbw-a32nx/src/wasm/fbw_a320/src/FlyByWireInterface.cpp
+@@ -61,6 +61,12 @@ void FlyByWireInterface::disconnect() {
+ bool FlyByWireInterface::update(double sampleTime) {
+   bool result = true;
+ 
++  // SharedDeck client: all systems are computed by the host and mirrored into this sim.
++  // Pending SimConnect messages are discarded so no stale inputs are applied after switching back.
++  if (idSharedDeckRole->get(true) == SHARED_DECK_ROLE_CLIENT) {
++    return simConnectInterface.discardData();
++  }
++
+   // get data & inputs
+   result &= readDataAndLocalVariables(sampleTime);
+ 
+@@ -329,6 +335,7 @@ void FlyByWireInterface::loadConfiguration() {
+ void FlyByWireInterface::setupLocalVariables() {
+   // regsiter L variable for init state and ready signal
+   idIsReady = std::make_unique<LocalVariable>("A32NX_IS_READY");
++  idSharedDeckRole = std::make_unique<LocalVariable>("SHAREDDECK_ROLE");
+   idStartState = std::make_unique<LocalVariable>("A32NX_START_STATE");
+ 
+   // regsiter L variable for logging
+@@ -361,6 +368,9 @@ void FlyByWireInterface::setupLocalVariables() {
+   // register L variables for the sidestick
+   idSideStickPositionX = std::make_unique<LocalVariable>("A32NX_SIDESTICK_POSITION_X");
+   idSideStickPositionY = std::make_unique<LocalVariable>("A32NX_SIDESTICK_POSITION_Y");
++  // F/O sidestick, same sign convention as the captain variables above (written e.g. by SharedDeck)
++  idFoSideStickPositionX = std::make_unique<LocalVariable>("A32NX_SIDESTICK_FO_POSITION_X");
++  idFoSideStickPositionY = std::make_unique<LocalVariable>("A32NX_SIDESTICK_FO_POSITION_Y");
+   idRudderPedalPosition = std::make_unique<LocalVariable>("A32NX_RUDDER_PEDAL_POSITION");
+ 
+   // register L variables for flight guidance
+@@ -1401,9 +1411,9 @@ bool FlyByWireInterface::updateElac(double sampleTime, int elacIndex) {
+   elacs[elacIndex].modelInputs.in.discrete_inputs.normal_powersupply_lost = false;
+ 
+   elacs[elacIndex].modelInputs.in.analog_inputs.capt_pitch_stick_pos = -simInput.inputs[0];
+-  elacs[elacIndex].modelInputs.in.analog_inputs.fo_pitch_stick_pos = 0;
++  elacs[elacIndex].modelInputs.in.analog_inputs.fo_pitch_stick_pos = idFoSideStickPositionY->get();
+   elacs[elacIndex].modelInputs.in.analog_inputs.capt_roll_stick_pos = -simInput.inputs[1];
+-  elacs[elacIndex].modelInputs.in.analog_inputs.fo_roll_stick_pos = 0;
++  elacs[elacIndex].modelInputs.in.analog_inputs.fo_roll_stick_pos = idFoSideStickPositionX->get();
+   double leftElevPos = -idLeftElevatorPosition->get();
+   double rightElevPos = -idRightElevatorPosition->get();
+   elacs[elacIndex].modelInputs.in.analog_inputs.left_elevator_pos_deg = leftElevPos * 30;
+@@ -1558,7 +1568,7 @@ bool FlyByWireInterface::updateSec(double sampleTime, int secIndex) {
+ 
+   if (secIndex < 2) {
+     secs[secIndex].modelInputs.in.analog_inputs.capt_pitch_stick_pos = -simInput.inputs[0];
+-    secs[secIndex].modelInputs.in.analog_inputs.fo_pitch_stick_pos = 0;
++    secs[secIndex].modelInputs.in.analog_inputs.fo_pitch_stick_pos = idFoSideStickPositionY->get();
+     double leftElevPos = -idLeftElevatorPosition->get();
+     double rightElevPos = -idRightElevatorPosition->get();
+     secs[secIndex].modelInputs.in.analog_inputs.left_elevator_pos_deg = leftElevPos * 30;
+@@ -1576,7 +1586,7 @@ bool FlyByWireInterface::updateSec(double sampleTime, int secIndex) {
+     secs[secIndex].modelInputs.in.analog_inputs.load_factor_acc_2_g = 0;
+   }
+   secs[secIndex].modelInputs.in.analog_inputs.capt_roll_stick_pos = -simInput.inputs[1];
+-  secs[secIndex].modelInputs.in.analog_inputs.fo_roll_stick_pos = 0;
++  secs[secIndex].modelInputs.in.analog_inputs.fo_roll_stick_pos = idFoSideStickPositionX->get();
+   secs[secIndex].modelInputs.in.analog_inputs.spd_brk_lever_pos =
+       spoilersHandler->getIsArmed() ? -0.05 : spoilersHandler->getHandlePosition();
+   secs[secIndex].modelInputs.in.analog_inputs.thr_lever_1_pos = thrustLeverAngle_1->get();
+diff --git a/fbw-a32nx/src/wasm/fbw_a320/src/FlyByWireInterface.h b/fbw-a32nx/src/wasm/fbw_a320/src/FlyByWireInterface.h
+index 15edbb3..38f1304 100644
+--- a/fbw-a32nx/src/wasm/fbw_a320/src/FlyByWireInterface.h
++++ b/fbw-a32nx/src/wasm/fbw_a320/src/FlyByWireInterface.h
+@@ -39,6 +39,8 @@ class FlyByWireInterface {
+ 
+   static constexpr double MAX_ACCEPTABLE_SAMPLE_TIME = 0.22;
+   static constexpr uint32_t LOW_PERFORMANCE_TIMER_THRESHOLD = 10;
++  // SharedDeck shared cockpit: on the client all systems are computed by the host
++  static constexpr double SHARED_DECK_ROLE_CLIENT = 1;
+   uint32_t lowPerformanceTimer = 0;
+ 
+   double previousSimulationTime = 0;
+@@ -169,6 +171,7 @@ class FlyByWireInterface {
+   bool wasFcuInitialized = false;
+   double simulationTimeReady = 0.0;
+   std::unique_ptr<LocalVariable> idIsReady;
++  std::unique_ptr<LocalVariable> idSharedDeckRole;
+   std::unique_ptr<LocalVariable> idStartState;
+ 
+   bool developmentLocalVariablesEnabled = false;
+@@ -196,6 +199,8 @@ class FlyByWireInterface {
+ 
+   std::unique_ptr<LocalVariable> idSideStickPositionX;
+   std::unique_ptr<LocalVariable> idSideStickPositionY;
++  std::unique_ptr<LocalVariable> idFoSideStickPositionX;
++  std::unique_ptr<LocalVariable> idFoSideStickPositionY;
+   std::unique_ptr<LocalVariable> idRudderPedalPosition;
+ 
+   std::unique_ptr<LocalVariable> idFmLateralPlanAvail;
+diff --git a/fbw-a32nx/src/wasm/fbw_a320/src/interface/SimConnectInterface.cpp b/fbw-a32nx/src/wasm/fbw_a320/src/interface/SimConnectInterface.cpp
+index ee96d99..07a23af 100644
+--- a/fbw-a32nx/src/wasm/fbw_a320/src/interface/SimConnectInterface.cpp
++++ b/fbw-a32nx/src/wasm/fbw_a320/src/interface/SimConnectInterface.cpp
+@@ -1057,6 +1057,22 @@ bool SimConnectInterface::readData() {
+   return true;
+ }
+ 
++bool SimConnectInterface::discardData() {
++  // check if we are connected
++  if (!isConnected) {
++    return false;
++  }
++
++  // drain dispatch message(s) without processing them
++  DWORD cbData;
++  SIMCONNECT_RECV* pData;
++  while (SUCCEEDED(SimConnect_GetNextDispatch(hSimConnect, &pData, &cbData))) {
++  }
++
++  // success
++  return true;
++}
++
+ bool SimConnectInterface::sendData(SimOutputZetaTrim output) {
+   // write data and return result
+   return sendData(3, sizeof(output), &output);
+diff --git a/fbw-a32nx/src/wasm/fbw_a320/src/interface/SimConnectInterface.h b/fbw-a32nx/src/wasm/fbw_a320/src/interface/SimConnectInterface.h
+index 5ad851b..bde0c6c 100644
+--- a/fbw-a32nx/src/wasm/fbw_a320/src/interface/SimConnectInterface.h
++++ b/fbw-a32nx/src/wasm/fbw_a320/src/interface/SimConnectInterface.h
+@@ -244,6 +244,8 @@ class SimConnectInterface {
+ 
+   bool readData();
+ 
++  bool discardData();
++
+   bool sendData(SimOutputZetaTrim output);
+ 
+   bool sendData(SimOutputThrottles output);
+diff --git a/fbw-common/src/systems/shared/src/failures/failures-orchestrator.ts b/fbw-common/src/systems/shared/src/failures/failures-orchestrator.ts
+index eb8cbb9..b60c443 100644
+--- a/fbw-common/src/systems/shared/src/failures/failures-orchestrator.ts
++++ b/fbw-common/src/systems/shared/src/failures/failures-orchestrator.ts
+@@ -14,6 +14,17 @@ export interface Failure {
+ 
+ export type FailureDefinition = [AtaChapterNumber, number, string];
+ 
++/** SharedDeck shared cockpit: failure (de)activation requested by the client pilot, executed by the host. */
++const SHAREDDECK_FAILURE_COMMAND = 'SHAREDDECK_FAILURE_COMMAND';
++
++interface SharedDeckFailureCommand {
++  identifier: number;
++  active: boolean;
++}
++
++/** On a SharedDeck client the host's orchestrator is the only source of active failures. */
++const isSharedDeckClient = (): boolean => SimVar.GetSimVarValue('L:SHAREDDECK_ROLE', 'number') === 1;
++
+ /**
+  * Orchestrates the activation and deactivation of failures.
+  *
+@@ -27,6 +38,23 @@ export class FailuresOrchestrator {
+     'FBW_FAILURE_REQUEST',
+   );
+ 
++  private readonly sharedDeckCommandListener = new GenericDataListenerSync(
++    (_topic: string, command: SharedDeckFailureCommand) => {
++      if (!isSharedDeckClient()) {
++        command.active ? this.activeFailures.add(command.identifier) : this.activeFailures.delete(command.identifier);
++        this.needSendFailures = true;
++      }
++    },
++    SHAREDDECK_FAILURE_COMMAND,
++  );
++
++  private readonly sharedDeckHostFailuresListener = new GenericDataListenerSync((_topic: string, active: number[]) => {
++    // shows the host's failures in this flyPad
++    if (isSharedDeckClient()) {
++      this.activeFailures = new Set(active);
++    }
++  }, 'FBW_FAILURE_UPDATE');
++
+   private failures: Failure[] = [];
+ 
+   private activeFailures = new Set<number>();
+@@ -64,7 +92,7 @@ export class FailuresOrchestrator {
+   }
+ 
+   update() {
+-    if (this.needSendFailures) {
++    if (this.needSendFailures && !isSharedDeckClient()) {
+       this.needSendFailures = false;
+       const failures = Array.from(this.activeFailures);
+       this.sendFailuresToWasm(failures);
+@@ -76,6 +104,10 @@ export class FailuresOrchestrator {
+    * Activates the failure with the given identifier.
+    */
+   async activate(identifier: number): Promise<void> {
++    if (isSharedDeckClient()) {
++      this.sharedDeckCommandListener.sendEvent(SHAREDDECK_FAILURE_COMMAND, { identifier, active: true });
++      return;
++    }
+     this.activeFailures.add(identifier);
+     this.needSendFailures = true;
+   }
+@@ -84,6 +116,10 @@ export class FailuresOrchestrator {
+    * Deactivates the failure with the given identifier.
+    */
+   async deactivate(identifier: number): Promise<void> {
++    if (isSharedDeckClient()) {
++      this.sharedDeckCommandListener.sendEvent(SHAREDDECK_FAILURE_COMMAND, { identifier, active: false });
++      return;
++    }
+     this.activeFailures.delete(identifier);
+     this.needSendFailures = true;
+   }
+diff --git a/fbw-common/src/wasm/cpp-msfs-framework/MsfsHandler/MsfsHandler.cpp b/fbw-common/src/wasm/cpp-msfs-framework/MsfsHandler/MsfsHandler.cpp
+index 72e9846..7f7b692 100644
+--- a/fbw-common/src/wasm/cpp-msfs-framework/MsfsHandler/MsfsHandler.cpp
++++ b/fbw-common/src/wasm/cpp-msfs-framework/MsfsHandler/MsfsHandler.cpp
+@@ -86,6 +86,8 @@ bool MsfsHandler::initialize() {
+   }
+   LOG_INFO(simConnectName + ": Subscribed to PAUSE_EX1 event");
+ 
++  sharedDeckRole = dataManager.make_named_var("SHAREDDECK_ROLE", UNITS.Number, UpdateMode::NO_AUTO_UPDATE, 0.0, 0, true);
++
+   // Initialize modules
+   result = std::all_of(modules.begin(), modules.end(), [](Module* pModule) { return pModule->initialize(); });
+   if (!result) {
+@@ -129,6 +131,14 @@ bool MsfsHandler::update(sGaugeDrawData* pData) {
+   FLOAT64 previousTimeStamp = timeStamp;
+   timeStamp                 = baseSimData->data().simulationTime;
+   simulationDeltaTime       = std::max(0., timeStamp - previousTimeStamp);
++
++  // SharedDeck client: skip all modules. The time stamp is still advanced above so that
++  // switching back to host does not produce one huge delta time.
++  if (sharedDeckRole->readFromSim() == SHARED_DECK_ROLE_CLIENT) {
++    simulationDeltaTime = 0.;
++    return true;
++  }
++
+   tickCounter++;
+ 
+   // Call preUpdate(), update() and postUpdate() for all modules
+diff --git a/fbw-common/src/wasm/cpp-msfs-framework/MsfsHandler/MsfsHandler.h b/fbw-common/src/wasm/cpp-msfs-framework/MsfsHandler/MsfsHandler.h
+index 1492171..72b6b8a 100644
+--- a/fbw-common/src/wasm/cpp-msfs-framework/MsfsHandler/MsfsHandler.h
++++ b/fbw-common/src/wasm/cpp-msfs-framework/MsfsHandler/MsfsHandler.h
+@@ -90,6 +90,14 @@ class MsfsHandler {
+   NamedVariablePtr a32nxPauseDetected;
+   ClientEventPtr   pauseDetectedEvent;
+ 
++  /**
++   * SharedDeck shared cockpit role (L:SHAREDDECK_ROLE, without aircraft prefix).<br/>
++   * On the client (1) all systems are computed by the host and mirrored into this sim,
++   * so the modules must not run.
++   */
++  static constexpr INT64 SHARED_DECK_ROLE_CLIENT = 1;
++  NamedVariablePtr       sharedDeckRole;
++
+   /**
+    * Current simulation time used for pause detection and time stamping variable updates
+    */
+diff --git a/fbw-common/src/wasm/systems/systems_wasm/src/lib.rs b/fbw-common/src/wasm/systems/systems_wasm/src/lib.rs
+index 3d572ee..a2abe5a 100644
+--- a/fbw-common/src/wasm/systems/systems_wasm/src/lib.rs
++++ b/fbw-common/src/wasm/systems/systems_wasm/src/lib.rs
+@@ -190,8 +190,13 @@ pub struct MsfsHandler {
+     failures: Rc<RefCell<Failures>>,
+     _commbus: CommBus<'static>,
+     time: Time,
++    shared_deck_role: NamedVariable,
+ }
+ impl MsfsHandler {
++    /// SharedDeck shared cockpit: on the client (role 1) all systems are computed by the host
++    /// and mirrored into this sim, so the local simulation must not tick.
++    const SHARED_DECK_ROLE_CLIENT: f64 = 1.;
++
+     fn new(
+         variables: MsfsVariableRegistry,
+         aspects: Vec<Box<dyn Aspect>>,
+@@ -222,9 +227,15 @@ impl MsfsHandler {
+             failures,
+             _commbus: commbus,
+             time: Time::new(sim_connect)?,
++            shared_deck_role: NamedVariable::from("SHAREDDECK_ROLE"),
+         })
+     }
+ 
++    fn is_shared_deck_client(&self) -> bool {
++        let role: f64 = self.shared_deck_role.get_value();
++        role == Self::SHARED_DECK_ROLE_CLIENT
++    }
++
+     pub fn handle<T: Aircraft>(
+         &mut self,
+         event: MSFSEvent,
+@@ -233,7 +244,10 @@ impl MsfsHandler {
+     ) -> Result<(), Box<dyn Error>> {
+         match event {
+             MSFSEvent::PreDraw(_) => {
+-                if !self.time.is_pausing() {
++                if self.is_shared_deck_client() {
++                    // Discard the elapsed time so switching back to host doesn't tick one huge delta.
++                    self.time.take();
++                } else if !self.time.is_pausing() {
+                     let delta_time = self.time.take();
+                     self.pre_tick(sim_connect, delta_time)?;
+                     self.read_failures_into_simulation(simulation);
+-- 
+2.45.1.windows.1
+

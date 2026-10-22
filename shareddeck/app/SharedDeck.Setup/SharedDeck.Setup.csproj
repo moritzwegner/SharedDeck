@@ -1,0 +1,22 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\SharedDeck.Core\SharedDeck.Core.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>SharedDeck-Setup</AssemblyName>
+    <Version>0.1.0</Version>
+  </PropertyGroup>
+
+  <!-- app + module, packed by installer/build-installer.ps1 -->
+  <ItemGroup Condition="Exists('payload\payload.zip')">
+    <EmbeddedResource Include="payload\payload.zip" LogicalName="payload.zip" />
+  </ItemGroup>
+
+</Project>
