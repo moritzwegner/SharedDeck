@@ -249,6 +249,47 @@ public class SessionControllerTests : IDisposable
     }
 
     [Fact]
+    public async Task ClientWithoutSimulatorDoesNotConnect()
+    {
+        hostBridge.Connect();
+        host.StartHost();
+
+        await client.ConnectAsync("127.0.0.1");
+
+        Assert.Equal(SessionState.Idle, client.Status.State);
+        Assert.Contains("Simulator ist nicht mit SharedDeck verbunden", client.Status.Reason);
+        Assert.Equal(SessionState.WaitingForCoPilot, host.Status.State);
+    }
+
+    [Fact]
+    public async Task HostNamesOfficialAircraftOfCoPilot()
+    {
+        hostBridge.Connect(version: "a32nx-v2024.2.0-shareddeck/client-mode.76db0ae+76db0aef");
+        clientBridge.Connect(version: "a32nx-v2024.1.0-rel.161051a+161051ad");
+        host.StartHost();
+        await client.ConnectAsync("127.0.0.1");
+
+        await Wait.Until(() => client.Status.Reason.Contains("Abgelehnt"));
+        Assert.Contains("Co-Pilot: normaler FlyByWire A32NX a32nx-v2024.1.0-rel.161051a", client.Status.Reason);
+        Assert.Contains("Host: SharedDeck-A32NX", client.Status.Reason);
+    }
+
+    [Fact]
+    public async Task BridgeReconnectDropsOldBuild()
+    {
+        clientBridge.Connect(version: "old-build");
+        clientBridge.Disconnect();
+        hostBridge.Connect();
+        host.StartHost();
+
+        await client.ConnectAsync("127.0.0.1");
+
+        // the stale build must not be sent: the client stays put instead of being rejected for a wrong build
+        Assert.Equal(SessionState.Idle, client.Status.State);
+        Assert.DoesNotContain("unterschiedliche", client.Status.Reason);
+    }
+
+    [Fact]
     public async Task ClientHaltsWhenHostFramesStop()
     {
         await ConnectBoth();

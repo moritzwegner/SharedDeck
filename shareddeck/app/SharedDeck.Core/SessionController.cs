@@ -112,6 +112,9 @@ public sealed class SessionController : IDisposable
         {
             Log($"Simulator-Bridge getrennt: {why}");
             wasmReady = false;
+            // a stale build would be reported to the host after an aircraft change
+            bridgeVersion = "";
+            aircraft = "";
             if (state is SessionState.Live or SessionState.Synchronizing)
             {
                 Halt("Verbindung zum eigenen Simulator verloren");
@@ -166,6 +169,13 @@ public sealed class SessionController : IDisposable
         {
             if (role == SessionRole.Host)
             {
+                return;
+            }
+            // without its own simulator the host could only reject us, with a misleading reason
+            var notReady = LocalSimulatorProblem();
+            if (notReady != null)
+            {
+                SetState(SessionState.Idle, $"Nicht verbunden: {notReady}");
                 return;
             }
             role = SessionRole.Client;
@@ -468,7 +478,7 @@ public sealed class SessionController : IDisposable
                     ["bridgeVersion"] = bridgeVersion,
                     ["aircraft"] = aircraft,
                 }));
-                Log("Mit Host verbunden, warte auf Freigabe");
+                Log($"Mit Host verbunden, warte auf Freigabe (eigener Flugzeug-Build „{bridgeVersion}“)");
             }
             else
             {
@@ -608,18 +618,25 @@ public sealed class SessionController : IDisposable
         {
             return;
         }
+        var copilotBuild = message["bridgeVersion"]?.GetValue<string>() ?? "";
+        Log($"Co-Pilot meldet Flugzeug-Build „{(copilotBuild.Length > 0 ? copilotBuild : "–")}“, eigener Build „{bridgeVersion}“");
         string? rejection = null;
         if (message["version"]?.GetValue<int>() != Protocol.Version)
         {
             rejection = "unterschiedliche SharedDeck-Versionen";
         }
-        else if (!bridge.IsConnected || !wasmReady)
+        else if (LocalSimulatorProblem() is { } hostProblem)
         {
-            rejection = "der Simulator des Hosts ist nicht bereit (Flugzeug geladen? SharedDeck-Modul installiert?)";
+            rejection = $"beim Host: {hostProblem}";
         }
-        else if (message["bridgeVersion"]?.GetValue<string>() != bridgeVersion)
+        else if (copilotBuild.Length == 0)
         {
-            rejection = $"unterschiedliche Flugzeug-Builds (Host {bridgeVersion}, Co-Pilot {message["bridgeVersion"]?.GetValue<string>()})";
+            rejection = "beim Co-Piloten ist der Simulator nicht mit SharedDeck verbunden (MSFS mit dem SharedDeck-A32NX starten, " +
+                        "unter „Simulator“ muss „verbunden“ stehen)";
+        }
+        else if (copilotBuild != bridgeVersion)
+        {
+            rejection = DescribeBuildMismatch(bridgeVersion, copilotBuild);
         }
         if (rejection != null)
         {
@@ -638,6 +655,32 @@ public sealed class SessionController : IDisposable
         SetState(SessionState.Live, "Co-Pilot verbunden");
         StartLocalSession();
         PauseLocal(false);
+    }
+
+    /// <summary>Why this simulator can't take part, or null if it is ready.</summary>
+    private string? LocalSimulatorProblem()
+    {
+        if (!bridge.IsConnected)
+        {
+            return "der Simulator ist nicht mit SharedDeck verbunden (MSFS mit dem SharedDeck-A32NX starten und einen Flug laden)";
+        }
+        if (!wasmReady)
+        {
+            return "das SharedDeck-Modul antwortet nicht (Ordner shareddeck-module im Community-Ordner? MSFS danach neu gestartet?)";
+        }
+        return null;
+    }
+
+    /// <summary>Both aircraft builds in plain words, so it is clear who has to install what.</summary>
+    public static string DescribeBuildMismatch(string hostBuild, string copilotBuild)
+    {
+        static string Describe(string build) =>
+            build.Contains("shareddeck", StringComparison.OrdinalIgnoreCase) ? $"SharedDeck-A32NX {build}"
+            : build == "unknown" ? "Flugzeugversion nicht lesbar"
+            : $"normaler FlyByWire A32NX {build}";
+
+        return $"unterschiedliche Flugzeuge – Host: {Describe(hostBuild)}, Co-Pilot: {Describe(copilotBuild)}. " +
+               "Beide müssen den SharedDeck-A32NX aus demselben Release installieren (SharedDeck-Setup.exe mit den ZIP-Teilen).";
     }
 
     private void OnWelcome(JsonObject message)
