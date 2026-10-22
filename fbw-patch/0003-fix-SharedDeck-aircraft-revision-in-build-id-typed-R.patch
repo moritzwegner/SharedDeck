@@ -1,0 +1,74 @@
+From 8765eb18f36df204d2f3fc0b3bf071eb532656cf Mon Sep 17 00:00:00 2001
+From: Moritz Wegner <moritzwegner46@gmail.com>
+Date: Thu, 22 Oct 2026 20:13:33 +0200
+Subject: [PATCH 3/3] fix: SharedDeck aircraft revision in build id, typed RMP
+ hook
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../extras-host/modules/shareddeck/SharedDeckBridge.ts    | 8 ++++++--
+ .../src/RMP/Components/SharedDeckInteraction.ts           | 4 ++--
+ fbw-a32nx/src/systems/shared/src/SharedDeck.ts            | 6 ++++++
+ 3 files changed, 14 insertions(+), 4 deletions(-)
+
+diff --git a/fbw-a32nx/src/systems/extras-host/modules/shareddeck/SharedDeckBridge.ts b/fbw-a32nx/src/systems/extras-host/modules/shareddeck/SharedDeckBridge.ts
+index 1d47247..a4c3d7e 100644
+--- a/fbw-a32nx/src/systems/extras-host/modules/shareddeck/SharedDeckBridge.ts
++++ b/fbw-a32nx/src/systems/extras-host/modules/shareddeck/SharedDeckBridge.ts
+@@ -3,6 +3,7 @@
+ 
+ import { EventBus, HEvent, Instrument } from '@microsoft/msfs-sdk';
+ import { AircraftGithubVersionChecker } from '@flybywiresim/fbw-sdk';
++import { SHAREDDECK_AIRCRAFT_REVISION } from '@shared/SharedDeck';
+ 
+ interface GenericDataListener extends ViewListener.ViewListener {
+   onDataReceived(key: string, callback: (data: any) => void): void;
+@@ -57,8 +58,11 @@ export class SharedDeckBridge implements Instrument {
+ 
+   public init(): void {
+     AircraftGithubVersionChecker.getBuildInfo('a32nx')
+-      .then((info) => (this.buildVersion = `${info.version}+${info.sha.substring(0, 8)}`))
+-      .catch(() => (this.buildVersion = 'unknown'))
++      .then(
++        (info) =>
++          (this.buildVersion = `${info.version}+${info.sha.substring(0, 8)}+sd${SHAREDDECK_AIRCRAFT_REVISION}`),
++      )
++      .catch(() => (this.buildVersion = `unknown+sd${SHAREDDECK_AIRCRAFT_REVISION}`))
+       .finally(() => this.connect());
+ 
+     this.commBus = RegisterViewListener('JS_LISTENER_COMM_BUS', undefined, false);
+diff --git a/fbw-a32nx/src/systems/instruments/src/RMP/Components/SharedDeckInteraction.ts b/fbw-a32nx/src/systems/instruments/src/RMP/Components/SharedDeckInteraction.ts
+index 6d15abf..e8ba426 100644
+--- a/fbw-a32nx/src/systems/instruments/src/RMP/Components/SharedDeckInteraction.ts
++++ b/fbw-a32nx/src/systems/instruments/src/RMP/Components/SharedDeckInteraction.ts
+@@ -8,8 +8,8 @@ import { SharedDeck } from '@shared/SharedDeck';
+  * RMP key handling. On a SharedDeck client the key press is forwarded to the host, whose RMP
+  * executes it; the result arrives here mirrored, so the key must not be executed a second time.
+  */
+-export const useRmpInteractionEvent = (event: string, handler: (any?) => void): void =>
+-  useInteractionEvent(event, (detail) => {
++export const useRmpInteractionEvent = (event: string, handler: (detail?: unknown) => void): void =>
++  useInteractionEvent(event, (detail?: unknown) => {
+     if (!SharedDeck.isClient()) {
+       handler(detail);
+     }
+diff --git a/fbw-a32nx/src/systems/shared/src/SharedDeck.ts b/fbw-a32nx/src/systems/shared/src/SharedDeck.ts
+index 6cc8fe4..02edaad 100644
+--- a/fbw-a32nx/src/systems/shared/src/SharedDeck.ts
++++ b/fbw-a32nx/src/systems/shared/src/SharedDeck.ts
+@@ -12,6 +12,12 @@ export enum SharedDeckRole {
+   Host = 2,
+ }
+ 
++/**
++ * Revision of the SharedDeck changes in this aircraft. Part of the build both pilots must share,
++ * because the FBW build info alone does not change between SharedDeck builds of the same base.
++ */
++export const SHAREDDECK_AIRCRAFT_REVISION = 2;
++
+ export class SharedDeck {
+   public static role(): SharedDeckRole {
+     return SimVar.GetSimVarValue('L:SHAREDDECK_ROLE', 'number') ?? SharedDeckRole.Off;
+-- 
+2.45.1.windows.1
+

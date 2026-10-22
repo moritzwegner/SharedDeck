@@ -331,7 +331,8 @@ public sealed class SessionController : IDisposable
                 break;
             case "names":
             case "frame":
-                if (role == SessionRole.Host && peer?.IsConnected == true && state == SessionState.Live)
+                // also while halted: the client keeps the complete state and resumes without a keyframe
+                if (role == SessionRole.Host && peer?.IsConnected == true && state is SessionState.Live or SessionState.Halted)
                 {
                     peer.Send(Protocol.Wasm(payload));
                     if (type == "frame")
@@ -674,8 +675,10 @@ public sealed class SessionController : IDisposable
     /// <summary>Both aircraft builds in plain words, so it is clear who has to install what.</summary>
     public static string DescribeBuildMismatch(string hostBuild, string copilotBuild)
     {
+        // builds since SharedDeck 0.2.0 carry their SharedDeck revision as "+sdN"
         static string Describe(string build) =>
-            build.Contains("shareddeck", StringComparison.OrdinalIgnoreCase) ? $"SharedDeck-A32NX {build}"
+            build.Contains("+sd", StringComparison.Ordinal) ? $"SharedDeck-A32NX {build}"
+            : build.Contains("shareddeck", StringComparison.OrdinalIgnoreCase) ? $"veralteter SharedDeck-A32NX von vor 0.2.0 ({build})"
             : build == "unknown" ? "Flugzeugversion nicht lesbar"
             : $"normaler FlyByWire A32NX {build}";
 

@@ -21,7 +21,7 @@ public sealed class AVarEntry
 public sealed class SharedDeckConfig
 {
     /// <summary>Raised whenever the default sync lists change, so older files are upgraded on load.</summary>
-    public const int CurrentVersion = 2;
+    public const int CurrentVersion = 3;
 
     [JsonPropertyName("configVersion")] public int ConfigVersion { get; set; }
     [JsonPropertyName("peerPort")] public int PeerPort { get; set; } = 51530;
@@ -171,6 +171,8 @@ public sealed class SharedDeckConfig
             "A32NX_EFB_USING_AUTOBRIGHTNESS",
             "A32NX_EFB_USING_METRIC_UNIT",
             "A32NX_EFB_POWER",
+            // display brightness of this PC
+            "A32NX_AMBIENT_BRIGHTNESS",
             "XMLVAR_FirstUpdateTime",
             "XMLVAR_Interacting*",
             "XMLVAR_InteractingWith*",
@@ -221,7 +223,11 @@ public sealed class SharedDeckConfig
             new() { Name = "TURB ENG CORRECTED N2", Unit = "percent", Index = 1, IndexTo = 2, Setter = "@sc", Tolerance = 0.01 },
             new() { Name = "GENERAL ENG OIL TEMPERATURE", Unit = "celsius", Index = 1, IndexTo = 2, Setter = "@sc", Tolerance = 0.01 },
             // native state FBW changes through key events
+            // the STD flag first: while it is set, the simulator overrides the setting with 1013.25
+            new() { Name = "KOHLSMAN SETTING STD", Unit = "bool", Index = 1, IndexTo = 2, Setter = "@sc" },
+            new() { Name = "KOHLSMAN SETTING STD", Unit = "bool", Index = 4, Setter = "@sc" },
             new() { Name = "KOHLSMAN SETTING MB", Unit = "millibars", Index = 1, IndexTo = 2, Setter = "{i} {v} 16 * near (>K:2:KOHLSMAN_SET)", Tolerance = 0.07 },
+            new() { Name = "KOHLSMAN SETTING MB", Unit = "millibars", Index = 4, Setter = "{i} {v} 16 * near (>K:2:KOHLSMAN_SET)", Tolerance = 0.07 },
             new() { Name = "LIGHT POTENTIOMETER", Unit = "percent", Index = 1, IndexTo = 100, Setter = "{v} {i} (>K:2:LIGHT_POTENTIOMETER_SET)", Tolerance = 0.5 },
             new() { Name = "CIRCUIT SWITCH ON", Unit = "bool", Index = 1, IndexTo = 120, Setter = "(A:CIRCUIT SWITCH ON:{i}, bool) {v} != if{ {i} (>K:ELECTRICAL_CIRCUIT_TOGGLE) }" },
             new() { Name = "COM ACTIVE FREQUENCY", Unit = "hertz", Index = 1, Setter = "{v} near (>K:COM_RADIO_SET_HZ)" },

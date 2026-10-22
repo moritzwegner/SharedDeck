@@ -171,6 +171,23 @@ public class SessionControllerTests : IDisposable
     }
 
     [Fact]
+    public async Task FramesKeepFlowingWhileHalted()
+    {
+        await ConnectBoth();
+        clientBridge.RaiseWasm(new JsonObject
+        {
+            ["t"] = "verify", ["kind"] = "local", ["ok"] = false,
+            ["lvarMismatches"] = new JsonArray("X"), ["avarMismatches"] = new JsonArray(), ["contested"] = new JsonArray(),
+        });
+        await Wait.Until(() => host.Status.State == SessionState.Halted);
+
+        hostBridge.RaiseWasm(new JsonObject { ["t"] = "frame", ["seq"] = 7, ["key"] = false, ["l"] = "" });
+
+        // no frame gap after resuming, so no full resynchronisation is needed
+        await Wait.Until(() => clientBridge.SentWasm("frame").Any(f => f["seq"]!.GetValue<int>() == 7));
+    }
+
+    [Fact]
     public async Task RepeatedTransportMismatchHalts()
     {
         await ConnectBoth();
@@ -264,7 +281,7 @@ public class SessionControllerTests : IDisposable
     [Fact]
     public async Task HostNamesOfficialAircraftOfCoPilot()
     {
-        hostBridge.Connect(version: "a32nx-v2024.2.0-shareddeck/client-mode.76db0ae+76db0aef");
+        hostBridge.Connect(version: "a32nx-v2024.2.0-shareddeck/client-mode.76db0ae+76db0aef+sd2");
         clientBridge.Connect(version: "a32nx-v2024.1.0-rel.161051a+161051ad");
         host.StartHost();
         await client.ConnectAsync("127.0.0.1");
@@ -272,6 +289,16 @@ public class SessionControllerTests : IDisposable
         await Wait.Until(() => client.Status.Reason.Contains("Abgelehnt"));
         Assert.Contains("Co-Pilot: normaler FlyByWire A32NX a32nx-v2024.1.0-rel.161051a", client.Status.Reason);
         Assert.Contains("Host: SharedDeck-A32NX", client.Status.Reason);
+    }
+
+    [Fact]
+    public void OutdatedSharedDeckAircraftIsNamed()
+    {
+        var reason = SessionController.DescribeBuildMismatch(
+            "a32nx-v2024.2.0-shareddeck/client-mode.76db0ae+76db0aef+sd2",
+            "a32nx-v2024.2.0-shareddeck/client-mode.76db0ae+76db0aef");
+        Assert.Contains("Host: SharedDeck-A32NX", reason);
+        Assert.Contains("Co-Pilot: veralteter SharedDeck-A32NX von vor 0.2.0", reason);
     }
 
     [Fact]

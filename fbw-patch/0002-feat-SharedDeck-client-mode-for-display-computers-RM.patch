@@ -1,0 +1,588 @@
+From 95b2a6e31b3f44b458bc8b13931048e9306744b9 Mon Sep 17 00:00:00 2001
+From: Moritz Wegner <moritzwegner46@gmail.com>
+Date: Thu, 22 Oct 2026 19:55:59 +0200
+Subject: [PATCH 2/3] feat: SharedDeck client mode for display computers, RMP
+ and clock
+
+On a SharedDeck client the computers inside display instruments must not
+compute either, otherwise they keep writing values that differ from the
+mirrored host state (seen as repeated halts):
+
+- PFD PseudoDmc, OANS: outputs come from the host
+- RMP: key presses are executed by the host's RMP only
+- clock chrono/ET: show the host's timers, keys executed by the host
+- shared isSharedDeckClient() helper in fbw-common
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../systems/instruments/src/PFD/PseudoDmc.ts  | 30 ++++++++++++-------
+ .../src/RMP/Components/BaseRadioPanels.tsx    | 21 ++++++-------
+ .../src/RMP/Components/NavRadioPanel.tsx      |  5 ++--
+ .../RMP/Components/SharedDeckInteraction.ts   | 16 ++++++++++
+ .../src/RMP/Components/StandbyCourse.tsx      |  7 +++--
+ .../src/RMP/Components/StandbyFrequency.tsx   | 10 +++----
+ .../src/RMP/Components/VhfRadioPanel.tsx      |  6 ++--
+ .../src/Clock/Components/Chrono.tsx           | 27 ++++++++++++++---
+ .../src/Clock/Components/ElapsedTime.tsx      | 17 ++++++++---
+ .../instruments/src/Clock/shared/Utils.tsx    |  9 ++++++
+ .../src/systems/instruments/src/OANC/Oanc.tsx |  6 +++-
+ .../src/OANC/OansBrakeToVacateSelection.ts    |  7 +++--
+ .../src/systems/shared/src/SharedDeckRole.ts  |  9 ++++++
+ .../src/failures/failures-orchestrator.ts     |  4 +--
+ fbw-common/src/systems/shared/src/index.ts    |  1 +
+ 15 files changed, 127 insertions(+), 48 deletions(-)
+ create mode 100644 fbw-a32nx/src/systems/instruments/src/RMP/Components/SharedDeckInteraction.ts
+ create mode 100644 fbw-common/src/systems/shared/src/SharedDeckRole.ts
+
+diff --git a/fbw-a32nx/src/systems/instruments/src/PFD/PseudoDmc.ts b/fbw-a32nx/src/systems/instruments/src/PFD/PseudoDmc.ts
+index 1d83ee8..3512409 100644
+--- a/fbw-a32nx/src/systems/instruments/src/PFD/PseudoDmc.ts
++++ b/fbw-a32nx/src/systems/instruments/src/PFD/PseudoDmc.ts
+@@ -13,6 +13,7 @@ import {
+ } from '@microsoft/msfs-sdk';
+ import { A32NXElectricalSystemEvents } from '../../../shared/src/publishers/A32NXElectricalSystemPublisher';
+ import { A32NXFcuBusEvents } from '../../../shared/src/publishers/A32NXFcuBusPublisher';
++import { SharedDeck } from '../../../shared/src/SharedDeck';
+ import { Arinc429Values } from './shared/ArincValueProvider';
+ import {
+   Arinc429ConsumerSubject,
+@@ -110,6 +111,13 @@ export class PseudoDmc implements Instrument {
+     private readonly instrument: BaseInstrument,
+   ) {}
+ 
++  /** SharedDeck client: the DMC words are computed by the host's DMC and mirrored into this simulator. */
++  private writeWord(word: { writeToSimVar(name: string): void }, name: string): void {
++    if (!SharedDeck.isClient()) {
++      word.writeToSimVar(name);
++    }
++  }
++
+   /** @inheritdoc */
+   public init(): void {
+     this.isRightSide = this.instrument.instrumentIndex === 2;
+@@ -213,72 +221,72 @@ export class PseudoDmc implements Instrument {
+ 
+     this.dmcDiscreteWord350.sub(
+       (word) =>
+-        word.writeToSimVar(
++        this.writeWord(word, 
+           this.isRightSide ? 'L:A32NX_DMC_DISCRETE_WORD_350_RIGHT' : 'L:A32NX_DMC_DISCRETE_WORD_350_LEFT',
+         ),
+       true,
+     );
+     this.dmcAltitude.sub(
+-      (word) => word.writeToSimVar(this.isRightSide ? 'L:A32NX_DMC_ALTITUDE_RIGHT' : 'L:A32NX_DMC_ALTITUDE_LEFT'),
++      (word) => this.writeWord(word, this.isRightSide ? 'L:A32NX_DMC_ALTITUDE_RIGHT' : 'L:A32NX_DMC_ALTITUDE_LEFT'),
+       true,
+     );
+     this.dmcBaroCorrection.sub(
+       (word) =>
+-        word.writeToSimVar(this.isRightSide ? 'L:A32NX_DMC_BARO_CORRECTION_RIGHT' : 'L:A32NX_DMC_BARO_CORRECTION_LEFT'),
++        this.writeWord(word, this.isRightSide ? 'L:A32NX_DMC_BARO_CORRECTION_RIGHT' : 'L:A32NX_DMC_BARO_CORRECTION_LEFT'),
+       true,
+     );
+ 
+     this.dmcDiscreteWord271.sub(
+       (word) =>
+-        word.writeToSimVar(
++        this.writeWord(word, 
+           this.isRightSide ? 'L:A32NX_DMC_DISCRETE_WORD_271_RIGHT' : 'L:A32NX_DMC_DISCRETE_WORD_271_LEFT',
+         ),
+       true,
+     );
+     this.dmcDiscreteWord276.sub(
+       (word) =>
+-        word.writeToSimVar(
++        this.writeWord(word, 
+           this.isRightSide ? 'L:A32NX_DMC_DISCRETE_WORD_276_RIGHT' : 'L:A32NX_DMC_DISCRETE_WORD_276_LEFT',
+         ),
+       true,
+     );
+     this.dmcDiscreteWord313Onside.sub(
+       (word) =>
+-        word.writeToSimVar(
++        this.writeWord(word, 
+           this.isRightSide ? 'L:A32NX_DMC_IR_2_DISCRETE_WORD_RIGHT' : 'L:A32NX_DMC_IR_1_DISCRETE_WORD_LEFT',
+         ),
+       true,
+     );
+     this.dmcDiscreteWord313Backup.sub(
+       (word) =>
+-        word.writeToSimVar(
++        this.writeWord(word, 
+           this.isRightSide ? 'L:A32NX_DMC_IR_3_DISCRETE_WORD_RIGHT' : 'L:A32NX_DMC_IR_3_DISCRETE_WORD_LEFT',
+         ),
+       true,
+     );
+     this.dmcPitchAngleWord324Onside.sub(
+       (word) =>
+-        word.writeToSimVar(
++        this.writeWord(word, 
+           this.isRightSide ? 'L:A32NX_DMC_IR_2_PITCH_ANGLE_RIGHT' : 'L:A32NX_DMC_IR_1_PITCH_ANGLE_LEFT',
+         ),
+       true,
+     );
+     this.dmcPitchAngleWord324Backup.sub(
+       (word) =>
+-        word.writeToSimVar(
++        this.writeWord(word, 
+           this.isRightSide ? 'L:A32NX_DMC_IR_3_PITCH_ANGLE_RIGHT' : 'L:A32NX_DMC_IR_3_PITCH_ANGLE_LEFT',
+         ),
+       true,
+     );
+ 
+     this.dmcDiscreteWord270.sub((word) => {
+-      word.writeToSimVar(
++      this.writeWord(word, 
+         this.isRightSide ? 'L:A32NX_DMC_DISCRETE_WORD_270_RIGHT' : 'L:A32NX_DMC_DISCRETE_WORD_270_LEFT',
+       );
+     });
+ 
+     this.dmcDhMinimum.sub((word) => {
+-      word.writeToSimVar(this.isRightSide ? 'L:A32NX_DMC_DH_RIGHT' : 'L:A32NX_DMC_DH_LEFT');
++      this.writeWord(word, this.isRightSide ? 'L:A32NX_DMC_DH_RIGHT' : 'L:A32NX_DMC_DH_LEFT');
+     });
+ 
+     this.mainElecSupply.setConsumer(
+diff --git a/fbw-a32nx/src/systems/instruments/src/RMP/Components/BaseRadioPanels.tsx b/fbw-a32nx/src/systems/instruments/src/RMP/Components/BaseRadioPanels.tsx
+index da3b67e..2731a86 100644
+--- a/fbw-a32nx/src/systems/instruments/src/RMP/Components/BaseRadioPanels.tsx
++++ b/fbw-a32nx/src/systems/instruments/src/RMP/Components/BaseRadioPanels.tsx
+@@ -3,7 +3,8 @@
+ // SPDX-License-Identifier: GPL-3.0
+ 
+ import React, { useState } from 'react';
+-import { useSimVar, useInteractionSimVar, useInteractionEvent } from '@flybywiresim/fbw-sdk-react';
++import { useSimVar, useInteractionSimVar } from '@flybywiresim/fbw-sdk-react';
++import { useRmpInteractionEvent } from './SharedDeckInteraction';
+ import { TransceiverType } from './StandbyFrequency';
+ import { VhfRadioPanel } from './VhfRadioPanel';
+ import { NavRadioPanel } from './NavRadioPanel';
+@@ -63,25 +64,25 @@ const PoweredRadioPanel = (props: Props) => {
+   const [previousPanelMode, setPreviousPanelMode] = useState(panelMode);
+ 
+   // Hook radio management panel mode buttons to set panelMode SimVar.
+-  useInteractionEvent(`A32NX_RMP_${props.side}_VHF1_BUTTON_PRESSED`, () => {
++  useRmpInteractionEvent(`A32NX_RMP_${props.side}_VHF1_BUTTON_PRESSED`, () => {
+     setPanelMode(1);
+     setPreviousPanelMode(1);
+     setNavTransceiverType(TransceiverType.RADIO_VHF);
+   });
+ 
+-  useInteractionEvent(`A32NX_RMP_${props.side}_VHF2_BUTTON_PRESSED`, () => {
++  useRmpInteractionEvent(`A32NX_RMP_${props.side}_VHF2_BUTTON_PRESSED`, () => {
+     setPanelMode(2);
+     setPreviousPanelMode(2);
+     setNavTransceiverType(TransceiverType.RADIO_VHF);
+   });
+ 
+-  useInteractionEvent(`A32NX_RMP_${props.side}_VHF3_BUTTON_PRESSED`, () => {
++  useRmpInteractionEvent(`A32NX_RMP_${props.side}_VHF3_BUTTON_PRESSED`, () => {
+     setPanelMode(3);
+     setPreviousPanelMode(3);
+     setNavTransceiverType(TransceiverType.RADIO_VHF);
+   });
+ 
+-  useInteractionEvent(`A32NX_RMP_${props.side}_NAV_BUTTON_PRESSED`, () => {
++  useRmpInteractionEvent(`A32NX_RMP_${props.side}_NAV_BUTTON_PRESSED`, () => {
+     if (navButtonPressed) {
+       setPanelMode(previousPanelMode);
+       setNavTransceiverType(TransceiverType.RADIO_VHF);
+@@ -90,35 +91,35 @@ const PoweredRadioPanel = (props: Props) => {
+     setNavButton(!navButtonPressed);
+   });
+ 
+-  useInteractionEvent(`A32NX_RMP_${props.side}_VOR_BUTTON_PRESSED`, () => {
++  useRmpInteractionEvent(`A32NX_RMP_${props.side}_VOR_BUTTON_PRESSED`, () => {
+     if (navButtonPressed) {
+       setPanelMode(6);
+       setNavTransceiverType(TransceiverType.VOR);
+     }
+   });
+ 
+-  useInteractionEvent(`A32NX_RMP_${props.side}_ILS_BUTTON_PRESSED`, () => {
++  useRmpInteractionEvent(`A32NX_RMP_${props.side}_ILS_BUTTON_PRESSED`, () => {
+     if (navButtonPressed) {
+       setPanelMode(7);
+       setNavTransceiverType(TransceiverType.ILS);
+     }
+   });
+ 
+-  useInteractionEvent(`A32NX_RMP_${props.side}_GLS_BUTTON_PRESSED`, () => {
++  useRmpInteractionEvent(`A32NX_RMP_${props.side}_GLS_BUTTON_PRESSED`, () => {
+     if (navButtonPressed) {
+       setPanelMode(8);
+       setNavTransceiverType(TransceiverType.GLS);
+     }
+   });
+ 
+-  useInteractionEvent(`A32NX_RMP_${props.side}_MLS_BUTTON_PRESSED`, () => {
++  useRmpInteractionEvent(`A32NX_RMP_${props.side}_MLS_BUTTON_PRESSED`, () => {
+     if (navButtonPressed) {
+       setPanelMode(9);
+       setNavTransceiverType(TransceiverType.MLS);
+     }
+   });
+ 
+-  useInteractionEvent(`A32NX_RMP_${props.side}_ADF_BUTTON_PRESSED`, () => {
++  useRmpInteractionEvent(`A32NX_RMP_${props.side}_ADF_BUTTON_PRESSED`, () => {
+     if (navButtonPressed) {
+       setPanelMode(10);
+       setNavTransceiverType(TransceiverType.ADF);
+diff --git a/fbw-a32nx/src/systems/instruments/src/RMP/Components/NavRadioPanel.tsx b/fbw-a32nx/src/systems/instruments/src/RMP/Components/NavRadioPanel.tsx
+index c4ec50a..253247a 100644
+--- a/fbw-a32nx/src/systems/instruments/src/RMP/Components/NavRadioPanel.tsx
++++ b/fbw-a32nx/src/systems/instruments/src/RMP/Components/NavRadioPanel.tsx
+@@ -4,7 +4,8 @@
+ 
+ import React, { useEffect, useState } from 'react';
+ 
+-import { useSimVar, useInteractionEvent } from '@flybywiresim/fbw-sdk-react';
++import { useSimVar } from '@flybywiresim/fbw-sdk-react';
++import { useRmpInteractionEvent } from './SharedDeckInteraction';
+ import { StandbyFrequency, TransceiverType } from './StandbyFrequency';
+ import { StandbyCourse } from './StandbyCourse';
+ import { RadioPanelDisplay } from './RadioPanelDisplay';
+@@ -122,7 +123,7 @@ export const NavRadioPanel = (props: Props) => {
+   const [RA1] = useSimVar('L:A32NX_RA_1_RADIO_ALTITUDE', 'number');
+   const [RA2] = useSimVar('L:A32NX_RA_2_RADIO_ALTITUDE', 'number');
+ 
+-  useInteractionEvent(`A32NX_RMP_${props.side}_TRANSFER_BUTTON_PRESSED`, () => {
++  useRmpInteractionEvent(`A32NX_RMP_${props.side}_TRANSFER_BUTTON_PRESSED`, () => {
+     // Inhibit RMP tuning if below 700 RA, APPR engaged, at least one AP/FD engaged (FCOM compliant)
+     if ((RA1 >= 700 && RA2 >= 700) || !APPR || !AP) {
+       if (mode === Mode.FREQUENCY) {
+diff --git a/fbw-a32nx/src/systems/instruments/src/RMP/Components/SharedDeckInteraction.ts b/fbw-a32nx/src/systems/instruments/src/RMP/Components/SharedDeckInteraction.ts
+new file mode 100644
+index 0000000..6d15abf
+--- /dev/null
++++ b/fbw-a32nx/src/systems/instruments/src/RMP/Components/SharedDeckInteraction.ts
+@@ -0,0 +1,16 @@
++// Copyright (c) 2026 FlyByWire Simulations
++// SPDX-License-Identifier: GPL-3.0
++
++import { useInteractionEvent } from '@flybywiresim/fbw-sdk-react';
++import { SharedDeck } from '@shared/SharedDeck';
++
++/**
++ * RMP key handling. On a SharedDeck client the key press is forwarded to the host, whose RMP
++ * executes it; the result arrives here mirrored, so the key must not be executed a second time.
++ */
++export const useRmpInteractionEvent = (event: string, handler: (any?) => void): void =>
++  useInteractionEvent(event, (detail) => {
++    if (!SharedDeck.isClient()) {
++      handler(detail);
++    }
++  });
+diff --git a/fbw-a32nx/src/systems/instruments/src/RMP/Components/StandbyCourse.tsx b/fbw-a32nx/src/systems/instruments/src/RMP/Components/StandbyCourse.tsx
+index 0397931..7c0ef72 100644
+--- a/fbw-a32nx/src/systems/instruments/src/RMP/Components/StandbyCourse.tsx
++++ b/fbw-a32nx/src/systems/instruments/src/RMP/Components/StandbyCourse.tsx
+@@ -3,7 +3,8 @@
+ // SPDX-License-Identifier: GPL-3.0
+ 
+ import React, { useCallback, useRef } from 'react';
+-import { RateMultiplierKnob, UpdateValueCallback, useInteractionEvent } from '@flybywiresim/fbw-sdk-react';
++import { RateMultiplierKnob, UpdateValueCallback } from '@flybywiresim/fbw-sdk-react';
++import { useRmpInteractionEvent } from './SharedDeckInteraction';
+ import { RadioPanelDisplay } from './RadioPanelDisplay';
+ 
+ interface Props {
+@@ -43,8 +44,8 @@ export const StandbyCourse = (props: Props) => {
+   innerKnob.current.updateValue = innerKnobUpdateCallback;
+ 
+   // Hook rotation events from simulator to custom knob class methods.
+-  useInteractionEvent(`A32NX_RMP_${props.side}_INNER_KNOB_TURNED_CLOCKWISE`, () => innerKnob.current.increase());
+-  useInteractionEvent(`A32NX_RMP_${props.side}_INNER_KNOB_TURNED_ANTICLOCKWISE`, () => innerKnob.current.decrease());
++  useRmpInteractionEvent(`A32NX_RMP_${props.side}_INNER_KNOB_TURNED_CLOCKWISE`, () => innerKnob.current.increase());
++  useRmpInteractionEvent(`A32NX_RMP_${props.side}_INNER_KNOB_TURNED_ANTICLOCKWISE`, () => innerKnob.current.decrease());
+ 
+   return <RadioPanelDisplay value={`C-${Math.abs(props.value).toString().padStart(3, '0')}`} />;
+ };
+diff --git a/fbw-a32nx/src/systems/instruments/src/RMP/Components/StandbyFrequency.tsx b/fbw-a32nx/src/systems/instruments/src/RMP/Components/StandbyFrequency.tsx
+index b28532c..2ad2008 100644
+--- a/fbw-a32nx/src/systems/instruments/src/RMP/Components/StandbyFrequency.tsx
++++ b/fbw-a32nx/src/systems/instruments/src/RMP/Components/StandbyFrequency.tsx
+@@ -8,8 +8,8 @@ import {
+   usePersistentProperty,
+   RateMultiplierKnob,
+   UpdateValueCallback,
+-  useInteractionEvent,
+ } from '@flybywiresim/fbw-sdk-react';
++import { useRmpInteractionEvent } from './SharedDeckInteraction';
+ import { RadioPanelDisplay } from './RadioPanelDisplay';
+ 
+ declare const Utils; // this can also be replaced once /typings are available
+@@ -212,10 +212,10 @@ export const StandbyFrequency = (props: Props) => {
+   innerKnob.current.updateValue = innerKnobUpdateCallback;
+ 
+   // Hook rotation events from simulator to custom knob class methods.
+-  useInteractionEvent(`A32NX_RMP_${props.side}_OUTER_KNOB_TURNED_CLOCKWISE`, () => outerKnob.current.increase());
+-  useInteractionEvent(`A32NX_RMP_${props.side}_OUTER_KNOB_TURNED_ANTICLOCKWISE`, () => outerKnob.current.decrease());
+-  useInteractionEvent(`A32NX_RMP_${props.side}_INNER_KNOB_TURNED_CLOCKWISE`, () => innerKnob.current.increase());
+-  useInteractionEvent(`A32NX_RMP_${props.side}_INNER_KNOB_TURNED_ANTICLOCKWISE`, () => innerKnob.current.decrease());
++  useRmpInteractionEvent(`A32NX_RMP_${props.side}_OUTER_KNOB_TURNED_CLOCKWISE`, () => outerKnob.current.increase());
++  useRmpInteractionEvent(`A32NX_RMP_${props.side}_OUTER_KNOB_TURNED_ANTICLOCKWISE`, () => outerKnob.current.decrease());
++  useRmpInteractionEvent(`A32NX_RMP_${props.side}_INNER_KNOB_TURNED_CLOCKWISE`, () => innerKnob.current.increase());
++  useRmpInteractionEvent(`A32NX_RMP_${props.side}_INNER_KNOB_TURNED_ANTICLOCKWISE`, () => innerKnob.current.decrease());
+ 
+   return <RadioPanelDisplay value={props.value} />;
+ };
+diff --git a/fbw-a32nx/src/systems/instruments/src/RMP/Components/VhfRadioPanel.tsx b/fbw-a32nx/src/systems/instruments/src/RMP/Components/VhfRadioPanel.tsx
+index 64cbe17..fdad612 100644
+--- a/fbw-a32nx/src/systems/instruments/src/RMP/Components/VhfRadioPanel.tsx
++++ b/fbw-a32nx/src/systems/instruments/src/RMP/Components/VhfRadioPanel.tsx
+@@ -5,12 +5,12 @@
+ import React, { useEffect } from 'react';
+ import {
+   useSplitSimVar,
+-  useInteractionEvent,
+   Arinc429Register,
+   Arinc429SignStatusMatrix,
+   RadioUtils,
+   useArinc429Var,
+ } from '@flybywiresim/fbw-sdk-react';
++import { useRmpInteractionEvent } from './SharedDeckInteraction';
+ import { StandbyFrequency, TransceiverType } from './StandbyFrequency';
+ import { RadioPanelDisplay } from './RadioPanelDisplay';
+ 
+@@ -79,7 +79,7 @@ export const VhfRadioPanel = (props: Props) => {
+   }, [atsuFrequency]);
+ 
+   // handle the load button
+-  useInteractionEvent(`A32NX_RMP_${props.side}_LOAD_BUTTON_PRESSED`, () => {
++  useRmpInteractionEvent(`A32NX_RMP_${props.side}_LOAD_BUTTON_PRESSED`, () => {
+     const availableMode = SimVar.GetSimVarValue(`L:A32NX_RMP_${props.side}_AVAILABLE_MODE`, 'enum');
+ 
+     // store the frequency as the new standby frequency
+@@ -90,7 +90,7 @@ export const VhfRadioPanel = (props: Props) => {
+   });
+ 
+   // Handle Transfer Button Pressed.
+-  useInteractionEvent(`A32NX_RMP_${props.side}_TRANSFER_BUTTON_PRESSED`, () => {
++  useRmpInteractionEvent(`A32NX_RMP_${props.side}_TRANSFER_BUTTON_PRESSED`, () => {
+     // Force the standby opposite side otherwise we would lose the frequency/data format
+     // Otherwise it would become frequency/frequency
+     if (props.vhf === 3) {
+diff --git a/fbw-common/src/systems/instruments/src/Clock/Components/Chrono.tsx b/fbw-common/src/systems/instruments/src/Clock/Components/Chrono.tsx
+index dd85626..de23e8c 100644
+--- a/fbw-common/src/systems/instruments/src/Clock/Components/Chrono.tsx
++++ b/fbw-common/src/systems/instruments/src/Clock/Components/Chrono.tsx
+@@ -1,6 +1,7 @@
+ // @ts-strict-ignore
+ import { ComponentProps, DisplayComponent, EventBus, FSComponent, HEvent, Subject, VNode } from '@microsoft/msfs-sdk';
+-import { debouncedTimeDelta } from '../shared/Utils';
++import { isSharedDeckClient } from '@flybywiresim/fbw-sdk';
++import { debouncedTimeDelta, mirroredElapsedTime } from '../shared/Utils';
+ import { ClockSimvars } from '../shared/ClockSimvarPublisher';
+ 
+ interface ChronoProps extends ComponentProps {
+@@ -49,6 +50,9 @@ export class Chrono extends DisplayComponent<ChronoProps> {
+ 
+   private prevTime: number;
+ 
++  /** SharedDeck client: updates left during which the mirrored time counts as running */
++  private mirroredRunningTicks = 0;
++
+   public onAfterRender(node: VNode): void {
+     super.onAfterRender(node);
+ 
+@@ -87,6 +91,15 @@ export class Chrono extends DisplayComponent<ChronoProps> {
+       .on('absTime')
+       .atFrequency(5)
+       .handle((absTime) => {
++        // SharedDeck client: the host's chrono runs, this one only shows it (running while the time advances)
++        if (isSharedDeckClient()) {
++          const mirrored = mirroredElapsedTime('L:A32NX_CHRONO_ELAPSED_TIME');
++          this.mirroredRunningTicks = mirrored !== this.elapsedTime.get() ? 10 : Math.max(0, this.mirroredRunningTicks - 1);
++          this.elapsedTime.set(mirrored);
++          this.running.set(mirrored !== null && this.mirroredRunningTicks > 0);
++          this.prevTime = absTime;
++          return;
++        }
+         if (this.running.get()) {
+           const newElapsedTime = (this.elapsedTime.get() || 0) + debouncedTimeDelta(absTime, this.prevTime);
+           this.elapsedTime.set(newElapsedTime);
+@@ -96,6 +109,10 @@ export class Chrono extends DisplayComponent<ChronoProps> {
+ 
+     const hEventsSub = this.props.bus.getSubscriber<HEvent>();
+     hEventsSub.on('hEvent').handle((eventName) => {
++      // SharedDeck client: the key press is executed by the host's clock
++      if (isSharedDeckClient()) {
++        return;
++      }
+       switch (eventName) {
+         case 'A32NX_CHRONO_RST':
+           if (this.dcEssIsPowered) {
+@@ -116,9 +133,11 @@ export class Chrono extends DisplayComponent<ChronoProps> {
+       }
+     });
+ 
+-    this.elapsedTime.sub((elapsedTime) =>
+-      SimVar.SetSimVarValue('L:A32NX_CHRONO_ELAPSED_TIME', 'number', elapsedTime ?? -1),
+-    ); // Simvar ist not nullable, so a -1 placeholder is used
++    this.elapsedTime.sub((elapsedTime) => {
++      if (!isSharedDeckClient()) {
++        SimVar.SetSimVarValue('L:A32NX_CHRONO_ELAPSED_TIME', 'number', elapsedTime ?? -1);
++      }
++    }); // Simvar ist not nullable, so a -1 placeholder is used
+ 
+     [this.elapsedTime, this.running, this.ltsTest].forEach((attr) =>
+       attr.sub(() =>
+diff --git a/fbw-common/src/systems/instruments/src/Clock/Components/ElapsedTime.tsx b/fbw-common/src/systems/instruments/src/Clock/Components/ElapsedTime.tsx
+index 820bc9f..e3b6fd7 100644
+--- a/fbw-common/src/systems/instruments/src/Clock/Components/ElapsedTime.tsx
++++ b/fbw-common/src/systems/instruments/src/Clock/Components/ElapsedTime.tsx
+@@ -1,6 +1,7 @@
+ // @ts-strict-ignore
+ import { ComponentProps, DisplayComponent, EventBus, FSComponent, Subject, VNode } from '@microsoft/msfs-sdk';
+-import { debouncedTimeDelta } from '../shared/Utils';
++import { isSharedDeckClient } from '@flybywiresim/fbw-sdk';
++import { debouncedTimeDelta, mirroredElapsedTime } from '../shared/Utils';
+ import { ClockSimvars } from '../shared/ClockSimvarPublisher';
+ 
+ const getDisplayString = (seconds: number | null, running: boolean, ltsTest: boolean): string => {
+@@ -95,6 +96,12 @@ export class ElapsedTime extends DisplayComponent<ElapsedTimeProps> {
+       .on('absTime')
+       .atFrequency(5)
+       .handle((absTime) => {
++        // SharedDeck client: the host's elapsed time counter runs, this one only shows it
++        if (isSharedDeckClient()) {
++          this.elapsedTime.set(mirroredElapsedTime('L:A32NX_CHRONO_ET_ELAPSED_TIME'));
++          this.prevTime = absTime;
++          return;
++        }
+         if (this.dcEssIsPowered) {
+           if (this.elapsedKnobPos.get() === 0) {
+             const newElapsedTime = (this.elapsedTime.get() || 0) + debouncedTimeDelta(absTime, this.prevTime);
+@@ -106,9 +113,11 @@ export class ElapsedTime extends DisplayComponent<ElapsedTimeProps> {
+         }
+       });
+ 
+-    this.elapsedTime.sub((elapsedTime) =>
+-      SimVar.SetSimVarValue('L:A32NX_CHRONO_ET_ELAPSED_TIME', 'number', elapsedTime ?? -1),
+-    ); // Simvar ist not nullable, so a -1 placeholder is used
++    this.elapsedTime.sub((elapsedTime) => {
++      if (!isSharedDeckClient()) {
++        SimVar.SetSimVarValue('L:A32NX_CHRONO_ET_ELAPSED_TIME', 'number', elapsedTime ?? -1);
++      }
++    }); // Simvar ist not nullable, so a -1 placeholder is used
+ 
+     [this.elapsedTime, this.ltsTest, this.elapsedKnobPos].forEach((attr) =>
+       attr.sub(() =>
+diff --git a/fbw-common/src/systems/instruments/src/Clock/shared/Utils.tsx b/fbw-common/src/systems/instruments/src/Clock/shared/Utils.tsx
+index 4fa71fa..a5ba334 100644
+--- a/fbw-common/src/systems/instruments/src/Clock/shared/Utils.tsx
++++ b/fbw-common/src/systems/instruments/src/Clock/shared/Utils.tsx
+@@ -7,3 +7,12 @@ export const debouncedTimeDelta = (absTimeSeconds: number, prevTimeSeconds: numb
+   // 60s detects forward time-shift
+   return diff < 60 ? diff : 0;
+ };
++
++/**
++ * SharedDeck client: the elapsed time of the host's clock, mirrored into this simulator.
++ * @returns the time in seconds, or null when the timer is reset (stored as -1)
++ */
++export const mirroredElapsedTime = (simVar: string): number | null => {
++  const value = SimVar.GetSimVarValue(simVar, 'number');
++  return value < 0 ? null : value;
++};
+diff --git a/fbw-common/src/systems/instruments/src/OANC/Oanc.tsx b/fbw-common/src/systems/instruments/src/OANC/Oanc.tsx
+index eb4e302..80415bd 100644
+--- a/fbw-common/src/systems/instruments/src/OANC/Oanc.tsx
++++ b/fbw-common/src/systems/instruments/src/OANC/Oanc.tsx
+@@ -33,6 +33,7 @@ import {
+   FeatureTypeString,
+   FmsOansData,
+   GenericAdirsEvents,
++  isSharedDeckClient,
+   MapParameters,
+   MathUtils,
+   OansControlEvents,
+@@ -575,7 +576,10 @@ export class Oanc<T extends number> extends DisplayComponent<OancProps<T>> {
+     );
+ 
+     this.pposNotAvailable.sub((notAvailable) => {
+-      SimVar.SetSimVarValue('L:A32NX_ARPT_NAV_POS_LOST', SimVarValueType.Bool, notAvailable);
++      // SharedDeck client: computed by the host's OANS and mirrored
++      if (!isSharedDeckClient()) {
++        SimVar.SetSimVarValue('L:A32NX_ARPT_NAV_POS_LOST', SimVarValueType.Bool, notAvailable);
++      }
+     }, true);
+   }
+ 
+diff --git a/fbw-common/src/systems/instruments/src/OANC/OansBrakeToVacateSelection.ts b/fbw-common/src/systems/instruments/src/OANC/OansBrakeToVacateSelection.ts
+index 17a7590..ad26242 100644
+--- a/fbw-common/src/systems/instruments/src/OANC/OansBrakeToVacateSelection.ts
++++ b/fbw-common/src/systems/instruments/src/OANC/OansBrakeToVacateSelection.ts
+@@ -16,7 +16,7 @@ import {
+ } from '@flybywiresim/fbw-sdk';
+ import { booleanContains, booleanDisjoint, lineOffset, lineString, point, polygon } from '@turf/turf';
+ import { FeatureCollection, Geometry, Polygon, Position } from 'geojson';
+-import { Arinc429Register, Arinc429SignStatusMatrix, MathUtils } from '@flybywiresim/fbw-sdk';
++import { Arinc429Register, Arinc429SignStatusMatrix, isSharedDeckClient, MathUtils } from '@flybywiresim/fbw-sdk';
+ import { Label, LabelStyle } from '.';
+ import { BtvData } from '../../../shared/src/publishers/OansBtv/BtvPublisher';
+ import { OancLabelManager } from './OancLabelManager';
+@@ -697,7 +697,10 @@ export class OansBrakeToVacateSelection<T extends number> {
+       faulty ? Arinc429SignStatusMatrix.FailureWarning : Arinc429SignStatusMatrix.NormalOperation,
+     );
+     this.rwyAheadArinc.setBitValue(11, bitValue);
+-    this.rwyAheadArinc.writeToSimVar('L:A32NX_OANS_WORD_1');
++    // SharedDeck client: computed by the host's OANS and mirrored
++    if (!isSharedDeckClient()) {
++      this.rwyAheadArinc.writeToSimVar('L:A32NX_OANS_WORD_1');
++    }
+ 
+     this.bus.getPublisher<FmsOansData>().pub('ndRwyAheadQfu', qfu, true);
+     return;
+diff --git a/fbw-common/src/systems/shared/src/SharedDeckRole.ts b/fbw-common/src/systems/shared/src/SharedDeckRole.ts
+new file mode 100644
+index 0000000..57a8375
+--- /dev/null
++++ b/fbw-common/src/systems/shared/src/SharedDeckRole.ts
+@@ -0,0 +1,9 @@
++// Copyright (c) 2026 FlyByWire Simulations
++// SPDX-License-Identifier: GPL-3.0
++
++/**
++ * Whether this simulator is the client of a SharedDeck shared cockpit session (L:SHAREDDECK_ROLE = 1).
++ * On the client all state is computed by the host and mirrored, so components that compute state
++ * or execute key presses must not do so here.
++ */
++export const isSharedDeckClient = (): boolean => SimVar.GetSimVarValue('L:SHAREDDECK_ROLE', 'number') === 1;
+diff --git a/fbw-common/src/systems/shared/src/failures/failures-orchestrator.ts b/fbw-common/src/systems/shared/src/failures/failures-orchestrator.ts
+index b60c443..ae10571 100644
+--- a/fbw-common/src/systems/shared/src/failures/failures-orchestrator.ts
++++ b/fbw-common/src/systems/shared/src/failures/failures-orchestrator.ts
+@@ -5,6 +5,7 @@
+ import { AtaChapterNumber } from '../ata';
+ import { GenericDataListenerSync } from '../GenericDataListenerSync';
+ import { ViewListenerUtils } from '../ViewListenerUtils';
++import { isSharedDeckClient } from '../SharedDeckRole';
+ 
+ export interface Failure {
+   ata: AtaChapterNumber;
+@@ -22,9 +23,6 @@ interface SharedDeckFailureCommand {
+   active: boolean;
+ }
+ 
+-/** On a SharedDeck client the host's orchestrator is the only source of active failures. */
+-const isSharedDeckClient = (): boolean => SimVar.GetSimVarValue('L:SHAREDDECK_ROLE', 'number') === 1;
+-
+ /**
+  * Orchestrates the activation and deactivation of failures.
+  *
+diff --git a/fbw-common/src/systems/shared/src/index.ts b/fbw-common/src/systems/shared/src/index.ts
+index 295b744..8f8b3c1 100644
+--- a/fbw-common/src/systems/shared/src/index.ts
++++ b/fbw-common/src/systems/shared/src/index.ts
+@@ -1,4 +1,5 @@
+ export * from './AircraftGithubVersionChecker';
++export * from './SharedDeckRole';
+ export * from './amdb';
+ export * from './ApproachUtils';
+ export * from './Arinc429ConsumerSubject';
+-- 
+2.45.1.windows.1
+
