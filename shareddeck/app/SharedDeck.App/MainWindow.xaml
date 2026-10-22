@@ -73,6 +73,8 @@
             <Button x:Name="AdoptButton" Content="Lokale Variablen freigeben" Click="OnAdopt"
                     ToolTip="Übernimmt die als lokal beschrieben gemeldeten Variablen in die Freigabeliste (Host, wirkt ab der nächsten Verbindung)." />
             <Button Content="Konfiguration öffnen" Click="OnOpenConfig" />
+            <Button Content="Protokollordner öffnen" Click="OnOpenLogs"
+                    ToolTip="Die Protokolle (eine Datei pro Tag) zum Weitergeben, wenn etwas nicht klappt." />
         </StackPanel>
 
         <!-- status -->
@@ -105,7 +107,20 @@
                 <TextBlock x:Name="InputsText" Grid.Row="3" Grid.Column="3" Style="{StaticResource Value}" />
                 <TextBlock Grid.Row="4" Style="{StaticResource Label}" Text="Schubhebel steuert" />
                 <TextBlock x:Name="LeversText" Grid.Row="4" Grid.Column="1" Style="{StaticResource Value}" />
+                <TextBlock Grid.Row="4" Grid.Column="2" Style="{StaticResource Label}" Text="Installation" />
+                <TextBlock x:Name="InstallText" Grid.Row="4" Grid.Column="3" Style="{StaticResource Value}" TextWrapping="Wrap" />
             </Grid>
+        </Border>
+
+        <!-- installation problems, hidden when everything is in place -->
+        <Border x:Name="InstallWarning" DockPanel.Dock="Top" Visibility="Collapsed" CornerRadius="6" Padding="14,10" Margin="0,0,0,12"
+                Background="#FEF3C7" BorderBrush="#F59E0B" BorderThickness="1">
+            <StackPanel>
+                <TextBlock FontWeight="SemiBold" Text="SharedDeck ist im Simulator nicht vollständig installiert" />
+                <TextBlock x:Name="InstallWarningText" TextWrapping="Wrap" Margin="0,4,0,0" />
+                <TextBlock TextWrapping="Wrap" Margin="0,4,0,0"
+                           Text="Bitte SharedDeck-Setup.exe mit den SharedDeck-A32NX-ZIP-Teilen ausführen und MSFS danach neu starten. Ohne den SharedDeck-A32NX kann sich die App nicht mit dem Simulator verbinden." />
+            </StackPanel>
         </Border>
 
         <!-- details -->

@@ -306,6 +306,31 @@ public class ProtocolTests
     }
 
     [Fact]
+    public void FirstVersionFileWithoutVersionFieldIsUpgraded()
+    {
+        // files written by the first release have no "configVersion" at all
+        var path = Path.GetTempFileName();
+        try
+        {
+            var old = SharedDeckConfig.CreateDefault();
+            var json = System.Text.Json.Nodes.JsonNode.Parse(System.Text.Json.JsonSerializer.Serialize(old))!.AsObject();
+            json.Remove("configVersion");
+            json["inputDeny"] = new System.Text.Json.Nodes.JsonArray("A32NX_EFB_*");
+            File.WriteAllText(path, json.ToJsonString());
+
+            var loaded = SharedDeckConfig.Load(path);
+
+            Assert.Equal(SharedDeckConfig.CurrentVersion, loaded.ConfigVersion);
+            Assert.Empty(loaded.InputDeny);
+            Assert.Contains("\"configVersion\"", File.ReadAllText(path));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
     public void ClientAppliesHostSettings()
     {
         var host = SharedDeckConfig.CreateDefault();

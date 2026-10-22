@@ -145,6 +145,29 @@ public sealed class InstallerTests : IDisposable
         Assert.False(File.Exists(Path.Combine(root, "evil.txt")));
     }
 
+    [Fact]
+    public void InstallationCheckRecognizesOfficialAndSharedDeckAircraft()
+    {
+        var community = Directory.CreateDirectory(Path.Combine(root, "Community")).FullName;
+        Assert.Contains("SharedDeck-Modul fehlt im Community-Ordner", InstallationCheck.Run(community).Problems);
+
+        var aircraft = Path.Combine(community, "flybywire-aircraft-a320-neo");
+        var extrasHost = Directory.CreateDirectory(Path.Combine(aircraft, "html_ui", "Pages", "VCockpit", "Instruments", "A32NX", "ExtrasHost")).FullName;
+        File.WriteAllText(Path.Combine(aircraft, "a32nx_build_info.json"), "{\"version\": \"a32nx-v2024.1.0-rel.161051a\"}");
+        File.WriteAllText(Path.Combine(extrasHost, "index.js"), "registerInstrument('extras-host', ExtrasHost);");
+        Directory.CreateDirectory(Path.Combine(community, "shareddeck-module", "modules"));
+        File.WriteAllText(Path.Combine(community, "shareddeck-module", "modules", "shareddeck-module.wasm"), "wasm");
+
+        var official = InstallationCheck.Run(community);
+        Assert.False(official.IsComplete);
+        Assert.Contains(official.Problems, p => p.Contains("normale FlyByWire A32NX (a32nx-v2024.1.0-rel.161051a)"));
+
+        File.AppendAllText(Path.Combine(extrasHost, "index.js"), "commBus.on('SHAREDDECK_FROM_WASM', send);");
+        var sharedDeck = InstallationCheck.Run(community);
+        Assert.True(sharedDeck.IsComplete);
+        Assert.Empty(sharedDeck.Problems);
+    }
+
     [Theory]
     [InlineData("InstalledPackagesPath \"D:\\MSFS2024\\Packages\"\nOther 1", "D:\\MSFS2024\\Packages")]
     [InlineData("Version 1\r\n  InstalledPackagesPath \"C:\\Users\\x\\AppData\\Local\\Packages\"\r\n", "C:\\Users\\x\\AppData\\Local\\Packages")]

@@ -3,6 +3,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Media;
 using SharedDeck.Core;
+using SharedDeck.Core.Installation;
 using SharedDeck.Core.Transport;
 
 namespace SharedDeck.App;
@@ -14,16 +15,19 @@ public partial class MainWindow : Window
     private static readonly string ConfigDirectory =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SharedDeck");
     private static readonly string ConfigPath = Path.Combine(ConfigDirectory, "shareddeck.json");
+    public static readonly string LogDirectory = Path.Combine(ConfigDirectory, "logs");
 
     private readonly SharedDeckConfig config;
     private readonly BridgeServer bridge;
     private readonly SessionController session;
+    private InstallationStatus installation = new(null, false, false, false, "");
 
     public MainWindow()
     {
         InitializeComponent();
 
         Directory.CreateDirectory(ConfigDirectory);
+        WriteLogFile($"===== {DateTime.Now:yyyy-MM-dd HH:mm:ss} SharedDeck {typeof(MainWindow).Assembly.GetName().Version?.ToString(3)} gestartet =====");
         config = SharedDeckConfig.Load(ConfigPath);
         AddressBox.Text = config.LastHostAddress;
         StrictBox.IsChecked = config.Strict;
@@ -41,7 +45,7 @@ public partial class MainWindow : Window
         }
         catch (Exception e)
         {
-            AddLog($"Bridge-Port {config.BridgePort} nicht verfügbar: {e.Message}");
+            AddLog($"Bridge-Port {config.BridgePort} ist belegt – läuft SharedDeck schon? Bitte nur eine SharedDeck-App pro PC öffnen. ({e.Message})");
         }
 
         Closed += (_, _) =>
@@ -50,7 +54,51 @@ public partial class MainWindow : Window
             session.Dispose();
             bridge.Dispose();
         };
+        CheckInstallation();
         Render();
+    }
+
+    /// <summary>Is the SharedDeck module and the SharedDeck A32NX in the simulator? Without them the bridge never connects.</summary>
+    private void CheckInstallation()
+    {
+        try
+        {
+            installation = InstallationCheck.Run();
+        }
+        catch (Exception e)
+        {
+            AddLog($"Installationsprüfung fehlgeschlagen: {e.Message}");
+            return;
+        }
+        AddLog($"Community-Ordner: {installation.CommunityFolder ?? "nicht gefunden"}");
+        if (installation.IsComplete)
+        {
+            AddLog($"Installation in Ordnung: SharedDeck-Modul und SharedDeck-A32NX ({installation.AircraftVersion})");
+        }
+        foreach (var problem in installation.Problems)
+        {
+            AddLog($"INSTALLATION: {problem}");
+        }
+    }
+
+    private void OnOpenLogs(object sender, RoutedEventArgs e)
+    {
+        Directory.CreateDirectory(LogDirectory);
+        Process.Start(new ProcessStartInfo(LogDirectory) { UseShellExecute = true });
+    }
+
+    /// <summary>Every log line also goes into a file per day, so it can be sent after a failed attempt.</summary>
+    public static void WriteLogFile(string line)
+    {
+        try
+        {
+            Directory.CreateDirectory(LogDirectory);
+            File.AppendAllText(Path.Combine(LogDirectory, $"shareddeck-{DateTime.Now:yyyy-MM-dd}.log"), line + Environment.NewLine);
+        }
+        catch (IOException)
+        {
+            // logging must never stop the app
+        }
     }
 
     private void OnHost(object sender, RoutedEventArgs e)
@@ -128,9 +176,24 @@ public partial class MainWindow : Window
             SessionState.LinkLost => ("Verbindung verloren – pausiert", Color.FromRgb(0xB9, 0x1C, 0x1C)),
             _ => (status.State.ToString(), Colors.Gray),
         };
+        var reason = status.Reason;
+        // without its simulator the host rejects every co-pilot, so it must not look "ready"
+        if (!status.BridgeConnected && status.State is SessionState.WaitingForCoPilot or SessionState.Connecting)
+        {
+            title = status.Role == SessionRole.Host ? "Host gestartet – aber dein Simulator ist nicht verbunden" : "Dein Simulator ist nicht verbunden";
+            color = Color.FromRgb(0xB4, 0x53, 0x09);
+            reason = "Der Co-Pilot wird abgelehnt, bis die App mit deinem Simulator verbunden ist: MSFS starten und einen Flug " +
+                     "mit dem SharedDeck-A32NX laden. Unter „Simulator“ muss „verbunden“ stehen.";
+        }
         StateText.Text = title;
-        ReasonText.Text = status.Reason;
+        ReasonText.Text = reason;
         Banner.Background = new SolidColorBrush(color);
+
+        InstallText.Text = installation.CommunityFolder == null ? "Community-Ordner nicht gefunden"
+            : installation.IsComplete ? $"in Ordnung ({installation.AircraftVersion})"
+            : "unvollständig";
+        InstallWarning.Visibility = installation.IsComplete ? Visibility.Collapsed : Visibility.Visible;
+        InstallWarningText.Text = string.Join("\n", installation.Problems.Select(p => "• " + p));
 
         BridgeText.Text = status.BridgeConnected ? $"verbunden ({status.Aircraft})" : "nicht verbunden";
         PeerText.Text = status.PeerConnected ? "verbunden" : "–";
@@ -171,6 +234,12 @@ public partial class MainWindow : Window
 
     private void AddLog(string line)
     {
+        // lines of the session already start with the time
+        if (!System.Text.RegularExpressions.Regex.IsMatch(line, @"^\d\d:\d\d:\d\d "))
+        {
+            line = $"{DateTime.Now:HH:mm:ss} {line}";
+        }
+        WriteLogFile(line);
         LogList.Items.Add(line);
         while (LogList.Items.Count > MaxLogLines)
         {

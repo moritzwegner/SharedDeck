@@ -82,11 +82,17 @@ Tailscale verbindet eure beiden PCs, als stünden sie im selben Heimnetz. Ihr m�
 
 | Was du siehst | Was tun |
 |---|---|
+| Gelber Kasten **„SharedDeck ist im Simulator nicht vollständig installiert“** | Die App hat beim Start den Community-Ordner geprüft. Steht dort „normaler FlyByWire A32NX“ oder „SharedDeck-Modul fehlt“: `SharedDeck-Setup.exe` mit den ZIP-Teilen ausführen, dann MSFS neu starten. |
+| **„Abgelehnt: der Simulator des Hosts ist nicht bereit“** | Beim **Host** ist die App nicht mit seinem Simulator verbunden. Er sieht dann oben „Host gestartet – aber dein Simulator ist nicht verbunden“ und muss sein Setup prüfen (siehe Zeile darüber). |
 | Banner **rot: NOT-HALT** | SharedDeck hat einen Unterschied zwischen euren Simulatoren gefunden und beide pausiert. Einer von euch klickt **„Neu synchronisieren und fortsetzen“**. Tritt es wiederholt auf: Text im Banner und Protokoll an den Host schicken. |
 | **„Abgelehnt: unterschiedliche Flugzeug-Builds“** | Du hast eine andere A32NX-Version als der Host. Setup mit der ZIP vom Host noch einmal ausführen. |
 | **„Verbindung fehlgeschlagen“** | Läuft Tailscale bei beiden? Ist die Adresse richtig? Hat der Host „Als Host starten“ geklickt? Beim Host fragt die Windows-Firewall beim ersten Mal, ob SharedDeck Verbindungen annehmen darf; dort muss er **Zulassen** wählen. |
 | **„Verbindung verloren – pausiert“** | Einfach erneut **„Verbinden“** klicken. |
 | Weiterfliegen ohne den Host | **„Trennen“** klicken. Dein Flugzeug fliegt ab dem letzten gemeinsamen Zustand allein weiter. |
+
+## Protokolle
+
+Die App schreibt alles mit, eine Datei pro Tag: **„Protokollordner öffnen“** in der App, oder `%APPDATA%\SharedDeck\logs`. Wenn etwas nicht klappt, schickt euch beide Dateien vom selben Tag.
 
 ## Deinstallieren
 
