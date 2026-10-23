@@ -1,7 +1,7 @@
 From 95b2a6e31b3f44b458bc8b13931048e9306744b9 Mon Sep 17 00:00:00 2001
 From: Moritz Wegner <moritzwegner46@gmail.com>
 Date: Thu, 22 Oct 2026 19:55:59 +0200
-Subject: [PATCH 2/3] feat: SharedDeck client mode for display computers, RMP
+Subject: [PATCH 2/4] feat: SharedDeck client mode for display computers, RMP
  and clock
 
 On a SharedDeck client the computers inside display instruments must not

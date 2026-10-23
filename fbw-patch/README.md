@@ -1,6 +1,6 @@
 # SharedDeck-Änderungen am FlyByWire A32NX
 
-Die Patches `0001-…` bis `0003-…` enthalten alle Änderungen am FlyByWire A32NX (Client-Modus der Systeme und Display-Rechner, F/O-Sidestick, Flugplan-/MCDU-Spiegelung, RMP, Uhr, Failures, SharedDeck-Bridge).
+Die Patches `0001-…` bis `0004-…` enthalten alle Änderungen am FlyByWire A32NX (Client-Modus der Systeme und Display-Rechner, F/O-Sidestick, Flugplan-/MCDU-Spiegelung, RMP, Uhr, Failures, SharedDeck-Bridge).
 
 Basis ist [flybywiresim/aircraft](https://github.com/flybywiresim/aircraft) Commit `76db0aef132fd9698fd4013e2d7239c517dd284e`. Die Skripte von SharedDeck erwarten den Fork unter `vendor/flybywire-aircraft`.
 

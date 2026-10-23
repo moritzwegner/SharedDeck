@@ -78,7 +78,7 @@ Daraus wird die Konfiguration fertig abgestimmt.
 |---|---|
 | Schalter, Knöpfe, Displays, ECAM, FCU, EFIS | Beide bedienen alles. Eingaben des Co-Piloten gehen an den Host und erscheinen nach einer Hin-und-Rück-Laufzeit (siehe „Latenz“ in der App). |
 | **Sidesticks** | Kapitän: eigener Stick wie gewohnt. Co-Pilot: seine Stick-Achsen steuern den **rechten Sidestick**. Gleichzeitige Eingaben werden wie im echten A320 addiert. Die **Priority-Taste** (rotes Knöpfchen am Stick) übergibt die Kontrolle. |
-| **Schubhebel** | Soft-Takeover: Der Hebel des Kapitäns hat Vorrang. Der Co-Pilot übernimmt, sobald sein Hebel die aktuelle Stellung erreicht (±4 %). Bewegt danach der Kapitän seinen Hebel, ist er wieder dran. Wer gerade steuert, zeigt die App unter „Schubhebel steuert“. |
+| **Schubhebel** | Soft-Takeover: Der Hebel des Kapitäns hat Vorrang. Der Co-Pilot übernimmt, sobald sein Hebel die aktuelle Stellung erreicht (±4 %). Bewegt danach der Kapitän seinen Hebel, ist er wieder dran. Wer gerade steuert, zeigt die App unter „Schubhebel steuert“. Der Co-Pilot bewegt die Schubhebel mit seinem Hardware-Hebel bzw. seinen Tasten; Ziehen mit der Maus im Cockpit geht nur beim Kapitän. |
 | Pedale, Bremsen | Wer zuletzt bewegt, bestimmt (die Pedale sind auch im echten Flugzeug gekoppelt). |
 | MCDU | Beide MCDUs zeigen dasselbe (wie bisher im A32NX). Die Tasten des Co-Piloten werden beim Host ausgeführt, auch die Eingabe über die PC-Tastatur. |
 | flyPad | Jeder hat sein eigenes Tablet. Betankung, Beladung, Türen, Bodendienste, SimBrief-Import und Failures funktionieren von beiden Tablets. Helligkeit, Einheiten und Ein/Aus bleiben pro Pilot. |
@@ -96,7 +96,8 @@ Daraus wird die Konfiguration fertig abgestimmt.
 
 ## 9. Bekannte Grenzen dieses Entwurfs
 
-- **Nicht im Simulator getestet.** Erwartet beim ersten Test Fehler. Das Protokoll in der App hilft beim Finden.
+- **Noch in der Testphase.** Not-Halts nennen die abweichende Variable; das Protokoll in der App (und das des Co-Piloten) hilft beim Finden.
+- **„Lokal freigeben“ ist eine Notlösung.** Eine freigegebene Variable wird nicht mehr verglichen. Beim nächsten Update gibt SharedDeck Variablen, deren Ursache behoben ist, automatisch wieder zur Synchronisation frei.
 - **Wetter** kann ein Add-on in MSFS nicht setzen. SharedDeck vergleicht Wind, Temperatur, Luftdruck, Sicht und Niederschlag und zeigt Abweichungen unter „Abweichungen“ als **Hinweis** an, ohne Not-Halt. Die Anzeigen im Cockpit stimmen trotzdem, weil sie vom Host kommen. Nur Wolken und Optik können sich unterscheiden. Am besten beide „Live-Wetter“ wählen.
 - Eingaben des Co-Piloten haben die Netzwerk-Laufzeit als Verzögerung (bei 50 ms RTT kaum spürbar).
 - Der Installer ist nicht digital signiert, deshalb warnt Windows SmartScreen beim ersten Start.

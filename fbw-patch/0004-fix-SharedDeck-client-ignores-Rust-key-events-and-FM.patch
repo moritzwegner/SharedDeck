@@ -1,0 +1,79 @@
+From 30abd3c28471d3ba54cb3474722e7b737e877714 Mon Sep 17 00:00:00 2001
+From: Moritz Wegner <moritzwegner46@gmail.com>
+Date: Fri, 23 Oct 2026 21:38:16 +0200
+Subject: [PATCH 4/4] fix: SharedDeck client ignores Rust key events and FMGC
+ radio tuning
+
+On the client the Rust systems no longer handle key events (flaps, brakes, ...):
+they are forwarded to the host, local writes competed with the mirrored values.
+The FMGC navaid tuner no longer tunes or blocks NAV frequency events there.
+SharedDeck aircraft revision 3.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ fbw-a32nx/src/systems/fmgc/src/navigation/NavaidTuner.ts | 6 ++++--
+ fbw-a32nx/src/systems/shared/src/SharedDeck.ts           | 2 +-
+ fbw-common/src/wasm/systems/systems_wasm/src/lib.rs      | 3 +++
+ 3 files changed, 8 insertions(+), 3 deletions(-)
+
+diff --git a/fbw-a32nx/src/systems/fmgc/src/navigation/NavaidTuner.ts b/fbw-a32nx/src/systems/fmgc/src/navigation/NavaidTuner.ts
+index 1be5012..20a0d6e 100644
+--- a/fbw-a32nx/src/systems/fmgc/src/navigation/NavaidTuner.ts
++++ b/fbw-a32nx/src/systems/fmgc/src/navigation/NavaidTuner.ts
+@@ -17,6 +17,7 @@ import {
+   VhfNavaidType,
+ } from '@flybywiresim/fbw-sdk';
+ import { FmgcFlightPhase } from '@shared/flightphase';
++import { SharedDeck } from '@shared/SharedDeck';
+ import { ConsumerSubject, EventBus, GameStateProvider, SimVarValueType, Subject, Wait } from '@microsoft/msfs-sdk';
+ 
+ export interface NavRadioTuningStatus {
+@@ -310,7 +311,8 @@ export class NavaidTuner {
+ 
+   // eslint-disable-next-line @typescript-eslint/no-unused-vars
+   update(deltaTime: number): void {
+-    if (!this.isInit) {
++    // SharedDeck client: the host's FMGC tunes the radios, its frequencies are mirrored into this sim
++    if (!this.isInit || SharedDeck.isClient()) {
+       return;
+     }
+ 
+@@ -352,7 +354,7 @@ export class NavaidTuner {
+ 
+   private handleKeyEvent(key: string, value1?: number, value0?: number, value2?: number): void {
+     if (NavaidTuner.TUNING_EVENT_INTERCEPTS.includes(key)) {
+-      if (this.rmpTuningActive || !this.isInit) {
++      if (this.rmpTuningActive || !this.isInit || SharedDeck.isClient()) {
+         // pass the tuning event through to the sim
+         Coherent.call('TRIGGER_KEY_EVENT', key, true, value0 ?? 0, value1 ?? 0, value2 ?? 0);
+       } else if (!this.blockEventMessageShown) {
+diff --git a/fbw-a32nx/src/systems/shared/src/SharedDeck.ts b/fbw-a32nx/src/systems/shared/src/SharedDeck.ts
+index 02edaad..190bd70 100644
+--- a/fbw-a32nx/src/systems/shared/src/SharedDeck.ts
++++ b/fbw-a32nx/src/systems/shared/src/SharedDeck.ts
+@@ -16,7 +16,7 @@ export enum SharedDeckRole {
+  * Revision of the SharedDeck changes in this aircraft. Part of the build both pilots must share,
+  * because the FBW build info alone does not change between SharedDeck builds of the same base.
+  */
+-export const SHAREDDECK_AIRCRAFT_REVISION = 2;
++export const SHAREDDECK_AIRCRAFT_REVISION = 3;
+ 
+ export class SharedDeck {
+   public static role(): SharedDeckRole {
+diff --git a/fbw-common/src/wasm/systems/systems_wasm/src/lib.rs b/fbw-common/src/wasm/systems/systems_wasm/src/lib.rs
+index a2abe5a..42a4349 100644
+--- a/fbw-common/src/wasm/systems/systems_wasm/src/lib.rs
++++ b/fbw-common/src/wasm/systems/systems_wasm/src/lib.rs
+@@ -261,6 +261,9 @@ impl MsfsHandler {
+                     self.time
+                         .increment(data.into::<SimulationTime>(sim_connect).unwrap());
+                 }
++                // SharedDeck client: key events (flaps, brakes, ...) are forwarded to the host, whose
++                // systems process them; written here they would compete with the mirrored values
++                _ if self.is_shared_deck_client() => {}
+                 _ => {
+                     self.handle_message(&message);
+                 }
+-- 
+2.45.1.windows.1
+

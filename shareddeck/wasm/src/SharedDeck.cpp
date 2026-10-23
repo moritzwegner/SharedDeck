@@ -995,6 +995,15 @@ void SharedDeck::clientDetectInputs() {
     if (sameBits(current, lvar.lastLocal)) {
       continue;
     }
+
+    // no pilot input: local code derives this variable (e.g. lever animation positions), the host value applies
+    if (lvar.inputDenied) {
+      if (!sameBits(current, lvar.value)) {
+        set_named_variable_value(lvar.localId, lvar.value);
+      }
+      lvar.lastLocal = lvar.value;
+      continue;
+    }
     lvar.lastLocal = current;
 
     if (time - lvar.windowStart > CONTESTED_WINDOW) {
@@ -1008,7 +1017,7 @@ void SharedDeck::clientDetectInputs() {
       lvar.pendingInputSeq = 0;
       send(json{{"t", "contested"}, {"name", lvar.name}}.dump());
     }
-    if (lvar.contested || lvar.inputDenied) {
+    if (lvar.contested) {
       continue;
     }
 

@@ -362,6 +362,8 @@ public class ProtocolTests
             old.LastHostAddress = "copilot-pc";
             old.Strict = false;
             old.LocalAllow.Add("MY_LOCAL_VAR");
+            old.LocalAllow.Add("A32NX_FLAPS_HANDLE_INDEX");
+            old.LocalAllow.Add("A:FUELSYSTEM VALVE SWITCH");
             old.AVars.Clear();
             old.Save(path);
 
@@ -371,6 +373,9 @@ public class ProtocolTests
             Assert.Equal("copilot-pc", loaded.LastHostAddress);
             Assert.False(loaded.Strict);
             Assert.Contains("MY_LOCAL_VAR", loaded.LocalAllow);
+            // declared local to get past emergency stops that this version fixes: synchronized again
+            Assert.DoesNotContain("A32NX_FLAPS_HANDLE_INDEX", loaded.LocalAllow);
+            Assert.DoesNotContain("A:FUELSYSTEM VALVE SWITCH", loaded.LocalAllow);
             Assert.Contains(loaded.AVars, a => a.Name == "GEAR CENTER POSITION" && a.Setter == "@sc");
         }
         finally
@@ -395,7 +400,7 @@ public class ProtocolTests
             var loaded = SharedDeckConfig.Load(path);
 
             Assert.Equal(SharedDeckConfig.CurrentVersion, loaded.ConfigVersion);
-            Assert.Empty(loaded.InputDeny);
+            Assert.DoesNotContain("A32NX_EFB_*", loaded.InputDeny);
             Assert.Contains("\"configVersion\"", File.ReadAllText(path));
         }
         finally

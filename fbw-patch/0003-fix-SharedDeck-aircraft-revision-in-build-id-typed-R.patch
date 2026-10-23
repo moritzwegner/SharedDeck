@@ -1,7 +1,7 @@
 From 8765eb18f36df204d2f3fc0b3bf071eb532656cf Mon Sep 17 00:00:00 2001
 From: Moritz Wegner <moritzwegner46@gmail.com>
 Date: Thu, 22 Oct 2026 20:13:33 +0200
-Subject: [PATCH 3/3] fix: SharedDeck aircraft revision in build id, typed RMP
+Subject: [PATCH 3/4] fix: SharedDeck aircraft revision in build id, typed RMP
  hook
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

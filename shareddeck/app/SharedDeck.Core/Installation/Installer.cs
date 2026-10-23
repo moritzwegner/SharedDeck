@@ -265,7 +265,7 @@ public static class Installer
 
         using var key = Registry.CurrentUser.CreateSubKey(UninstallKey);
         key.SetValue("DisplayName", "SharedDeck – Shared Cockpit für MSFS 2024");
-        key.SetValue("DisplayVersion", "0.3.2");
+        key.SetValue("DisplayVersion", "0.4.0");
         key.SetValue("Publisher", "SharedDeck");
         key.SetValue("DisplayIcon", app);
         key.SetValue("InstallLocation", options.InstallDirectory);

@@ -31,7 +31,7 @@ public sealed class LVarAction
 public sealed class SharedDeckConfig
 {
     /// <summary>Raised whenever the default sync lists change, so older files are upgraded on load.</summary>
-    public const int CurrentVersion = 5;
+    public const int CurrentVersion = 6;
 
     [JsonPropertyName("configVersion")] public int ConfigVersion { get; set; }
     [JsonPropertyName("peerPort")] public int PeerPort { get; set; } = 51530;
@@ -90,12 +90,32 @@ public sealed class SharedDeckConfig
         upgraded.RateHz = old.RateHz;
         upgraded.Strict = old.Strict;
         upgraded.PauseHostOnLinkLoss = old.PauseHostOnLinkLoss;
-        foreach (var name in old.LocalAllow.Where(n => !upgraded.LocalAllow.Contains(n)))
+        foreach (var name in old.LocalAllow.Where(n => !upgraded.LocalAllow.Contains(n) && !IsResolvedWorkaround(n)))
         {
             upgraded.LocalAllow.Add(name);
         }
         return upgraded;
     }
+
+    /// <summary>
+    /// Variables pilots declared local to get past an emergency stop whose cause this version fixes:
+    /// they are synchronized again after the upgrade instead of drifting unnoticed.
+    /// </summary>
+    private static readonly string[] ResolvedWorkarounds =
+    {
+        "A32NX_DMC_*",
+        "A32NX_FLAPS_HANDLE_INDEX",
+        "A32NX_AUTOTHRUST_TLA:*",
+        "XMLVAR_Throttle*Position",
+        "A:FUELSYSTEM VALVE SWITCH*",
+        "A:CIRCUIT SWITCH ON*",
+        "A:NAV ACTIVE FREQUENCY*",
+        "A:TURB ENG CORRECTED N*",
+    };
+
+    public static bool IsResolvedWorkaround(string name) =>
+        ResolvedWorkarounds.Any(pattern =>
+            System.Text.RegularExpressions.Regex.IsMatch(name, "^" + System.Text.RegularExpressions.Regex.Escape(pattern).Replace(@"\*", ".*") + "$"));
 
     public void Save(string path) => File.WriteAllText(path, JsonSerializer.Serialize(this, JsonOptions));
 
@@ -192,6 +212,14 @@ public sealed class SharedDeckConfig
             "XMLVAR_InteractingWith*",
             "XMLVAR_*Hidden*",
         },
+        InputDeny =
+        {
+            // derived from the host's thrust and flap levers by local code (lever animations): they always
+            // follow the host, the co-pilot moves the levers with key events (hardware levers, cockpit clicks)
+            "A32NX_AUTOTHRUST_TLA:*",
+            "XMLVAR_Throttle*Position",
+            "A32NX_FLAPS_HANDLE_INDEX",
+        },
         KeyDeny =
         {
             "VIEW*", "*CAMERA*", "EYEPOINT*", "CHASE*", "ZOOM*", "PANEL_*", "*_PANEL", "PAN_*",
@@ -234,8 +262,9 @@ public sealed class SharedDeckConfig
             new() { Name = "SPOILERS HANDLE POSITION", Unit = "percent", Setter = "@sc", Tolerance = 0.001 },
             new() { Name = "GENERAL ENG THROTTLE LEVER POSITION", Unit = "percent", Index = 1, IndexTo = 2, Setter = "@sc", Tolerance = 0.001 },
             // the native engine model keeps running on the co-pilot's PC: up to one frame of its drift is accepted
-            new() { Name = "TURB ENG CORRECTED N1", Unit = "percent", Index = 1, IndexTo = 2, Setter = "@sc", Tolerance = 0.5 },
-            new() { Name = "TURB ENG CORRECTED N2", Unit = "percent", Index = 1, IndexTo = 2, Setter = "@sc", Tolerance = 0.5 },
+            // (near maximum thrust it moves faster); the cockpit shows FBW's own engine values, synchronized exactly
+            new() { Name = "TURB ENG CORRECTED N1", Unit = "percent", Index = 1, IndexTo = 2, Setter = "@sc", Tolerance = 3 },
+            new() { Name = "TURB ENG CORRECTED N2", Unit = "percent", Index = 1, IndexTo = 2, Setter = "@sc", Tolerance = 3 },
             new() { Name = "GENERAL ENG OIL TEMPERATURE", Unit = "celsius", Index = 1, IndexTo = 2, Setter = "@sc", Tolerance = 0.5 },
             // native state FBW changes through key events
             // the STD flag first: while it is set, the simulator overrides the setting with 1013.25
@@ -244,15 +273,21 @@ public sealed class SharedDeckConfig
             new() { Name = "KOHLSMAN SETTING MB", Unit = "millibars", Index = 1, IndexTo = 2, Setter = "{i} {v} 16 * near (>K:2:KOHLSMAN_SET)", Tolerance = 0.07 },
             new() { Name = "KOHLSMAN SETTING MB", Unit = "millibars", Index = 4, Setter = "{i} {v} 16 * near (>K:2:KOHLSMAN_SET)", Tolerance = 0.07 },
             new() { Name = "LIGHT POTENTIOMETER", Unit = "percent", Index = 1, IndexTo = 100, Setter = "{v} {i} (>K:2:LIGHT_POTENTIOMETER_SET)", Tolerance = 0.5 },
-            // native fuel system, APU and starters, which FBW switches with key events; before the circuits,
-            // because the circuits of valves (1-12, 75) and pumps (79) follow their state
+            // native fuel system, APU and starters, which FBW switches with key events
             new() { Name = "FUELSYSTEM VALVE SWITCH", Unit = "bool", Index = 1, IndexTo = 12, Setter = "{v} 0.5 > if{ {i} (>K:FUELSYSTEM_VALVE_OPEN) } els{ {i} (>K:FUELSYSTEM_VALVE_CLOSE) }" },
             new() { Name = "FUELSYSTEM PUMP SWITCH", Unit = "enum", Index = 1, IndexTo = 7, Setter = "{v} 1.5 > if{ {v} {i} (>K:2:FUELSYSTEM_PUMP_SET) } els{ {v} 0.5 > if{ {i} (>K:FUELSYSTEM_PUMP_ON) } els{ {i} (>K:FUELSYSTEM_PUMP_OFF) } }" },
             new() { Name = "APU SWITCH", Unit = "bool", Setter = "{v} 0.5 > if{ (A:APU SWITCH, bool) ! if{ 1 (>K:APU_STARTER) } } els{ (A:APU SWITCH, bool) if{ 1 (>K:APU_OFF_SWITCH) } }" },
             new() { Name = "BLEED AIR APU", Unit = "bool", Setter = "{v} 0.5 > (>K:APU_BLEED_AIR_SOURCE_SET)" },
             new() { Name = "GENERAL ENG STARTER", Unit = "bool", Index = 1, Setter = "{v} 0.5 > (>K:STARTER1_SET)" },
             new() { Name = "GENERAL ENG STARTER", Unit = "bool", Index = 2, Setter = "{v} 0.5 > (>K:STARTER2_SET)" },
-            new() { Name = "CIRCUIT SWITCH ON", Unit = "bool", Index = 1, IndexTo = 120, Setter = "(A:CIRCUIT SWITCH ON:{i}, bool) {v} != if{ {i} (>K:ELECTRICAL_CIRCUIT_TOGGLE) }" },
+            // without the circuits of fuel pumps (2, 3, 64-67, 79), starters (8-10) and fuel valves (68-75, 90-93):
+            // the switches above set them, a toggle in the same frame would read the old state and undo it
+            new() { Name = "CIRCUIT SWITCH ON", Unit = "bool", Index = 1, Setter = "(A:CIRCUIT SWITCH ON:{i}, bool) {v} != if{ {i} (>K:ELECTRICAL_CIRCUIT_TOGGLE) }" },
+            new() { Name = "CIRCUIT SWITCH ON", Unit = "bool", Index = 4, IndexTo = 7, Setter = "(A:CIRCUIT SWITCH ON:{i}, bool) {v} != if{ {i} (>K:ELECTRICAL_CIRCUIT_TOGGLE) }" },
+            new() { Name = "CIRCUIT SWITCH ON", Unit = "bool", Index = 11, IndexTo = 63, Setter = "(A:CIRCUIT SWITCH ON:{i}, bool) {v} != if{ {i} (>K:ELECTRICAL_CIRCUIT_TOGGLE) }" },
+            new() { Name = "CIRCUIT SWITCH ON", Unit = "bool", Index = 76, IndexTo = 78, Setter = "(A:CIRCUIT SWITCH ON:{i}, bool) {v} != if{ {i} (>K:ELECTRICAL_CIRCUIT_TOGGLE) }" },
+            new() { Name = "CIRCUIT SWITCH ON", Unit = "bool", Index = 80, IndexTo = 89, Setter = "(A:CIRCUIT SWITCH ON:{i}, bool) {v} != if{ {i} (>K:ELECTRICAL_CIRCUIT_TOGGLE) }" },
+            new() { Name = "CIRCUIT SWITCH ON", Unit = "bool", Index = 94, IndexTo = 120, Setter = "(A:CIRCUIT SWITCH ON:{i}, bool) {v} != if{ {i} (>K:ELECTRICAL_CIRCUIT_TOGGLE) }" },
             new() { Name = "COM ACTIVE FREQUENCY", Unit = "hertz", Index = 1, Setter = "{v} near (>K:COM_RADIO_SET_HZ)" },
             new() { Name = "COM ACTIVE FREQUENCY", Unit = "hertz", Index = 2, Setter = "{v} near (>K:COM2_RADIO_SET_HZ)" },
             new() { Name = "COM ACTIVE FREQUENCY", Unit = "hertz", Index = 3, Setter = "{v} near (>K:COM3_RADIO_SET_HZ)" },
