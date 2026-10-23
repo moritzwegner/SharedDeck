@@ -16,8 +16,6 @@ Alle Dateien gibt es unter **Releases** im GitHub-Repo <https://github.com/morit
 | `SharedDeck-A32NX-part1of2.zip`, `…-part2of2.zip` | zusammen ca. 2,3 GB | der A320neo von FlyByWire in der SharedDeck-Version, wegen der Größe in Teilen |
 
 > **Wichtig:** Nimm dasselbe Release wie der Host. Ihr braucht exakt denselben Stand des Flugzeugs, sonst lehnt die App die Verbindung ab.
->
-> Das Repo ist privat. Damit du die Dateien sehen kannst, muss der Host dich als Mitwirkenden zum Repo einladen (GitHub-Konto nötig).
 
 ## Schritt 1: MSFS 2024 schließen
 
