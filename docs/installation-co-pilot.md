@@ -91,6 +91,16 @@ Tailscale verbindet eure beiden PCs, als stünden sie im selben Heimnetz. Ihr m�
 | **„Verbindung verloren – pausiert“** | Einfach erneut **„Verbinden“** klicken. |
 | Weiterfliegen ohne den Host | **„Trennen“** klicken. Dein Flugzeug fliegt ab dem letzten gemeinsamen Zustand allein weiter. |
 
+## Updates
+
+Neue Versionen musst du nicht mehr selbst herunterladen. Die App prüft beim Start, ob es auf GitHub eine neue Version gibt, und zeigt dann oben einen blauen Hinweis:
+
+1. **„Jetzt aktualisieren“** klicken. Die App lädt das Update herunter, mit Fortschrittsbalken, und prüft jede Datei.
+2. Danach schließt sie sich, das Setup installiert ohne weitere Fragen, und SharedDeck startet von selbst neu.
+3. Ändert sich auch das Flugzeug (der Hinweis sagt das, Download dann ca. 2,3 GB), muss MSFS dabei geschlossen sein.
+
+„Später“ blendet den Hinweis bis zum nächsten Start aus. Mit **„Nach Updates suchen“** prüfst du jederzeit von Hand. Während eines gemeinsamen Flugs wird nicht aktualisiert, vorher auf „Trennen“ klicken. Ihr solltet beide immer dieselbe Version haben.
+
 ## Protokolle
 
 Die App schreibt alles mit, eine Datei pro Tag: **„Protokollordner öffnen“** in der App, oder `%APPDATA%\SharedDeck\logs`. Wenn etwas nicht klappt, schickt euch beide Dateien vom selben Tag.

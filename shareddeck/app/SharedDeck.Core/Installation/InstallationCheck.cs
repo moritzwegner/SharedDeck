@@ -9,7 +9,8 @@ public sealed record InstallationStatus(
     bool ModuleInstalled,
     bool AircraftInstalled,
     bool AircraftIsSharedDeck,
-    string AircraftVersion)
+    string AircraftVersion,
+    int AircraftRevision = 0)
 {
     public bool IsComplete => ModuleInstalled && AircraftIsSharedDeck;
 
@@ -76,8 +77,20 @@ public static class InstallationCheck
         }
 
         var extrasHost = Path.Combine(aircraft, "html_ui", "Pages", "VCockpit", "Instruments", "A32NX", "ExtrasHost", "index.js");
-        var isSharedDeck = File.Exists(extrasHost) && File.ReadAllText(extrasHost).Contains(BridgeMarker, StringComparison.Ordinal);
+        var bridge = File.Exists(extrasHost) ? File.ReadAllText(extrasHost) : "";
+        var isSharedDeck = bridge.Contains(BridgeMarker, StringComparison.Ordinal);
 
-        return new InstallationStatus(communityFolder, module, aircraftInstalled, isSharedDeck, version);
+        return new InstallationStatus(communityFolder, module, aircraftInstalled, isSharedDeck, version, ReadRevision(bridge));
+    }
+
+    /// <summary>The SharedDeck revision compiled into the bridge; 1 for the first builds without one, 0 without SharedDeck.</summary>
+    public static int ReadRevision(string bridgeScript)
+    {
+        if (!bridgeScript.Contains(BridgeMarker, StringComparison.Ordinal))
+        {
+            return 0;
+        }
+        var match = System.Text.RegularExpressions.Regex.Match(bridgeScript, @"SHAREDDECK_AIRCRAFT_REVISION\s*=\s*(\d+)");
+        return match.Success ? int.Parse(match.Groups[1].Value) : 1;
     }
 }

@@ -84,3 +84,29 @@ if ($Aircraft) {
         Write-Host "Fertig: $name ($([math]::Round((Get-Item (Join-Path $dist $name)).Length / 1MB)) MB)"
     }
 }
+
+# release manifest for the in-app updater: version, aircraft revision and checksums of all release files
+Write-Host 'Release-Manifest schreiben'
+$version = ([xml](Get-Content (Join-Path $app 'SharedDeck.App\SharedDeck.App.csproj'))).Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
+$parts = @(Get-ChildItem $dist -Filter 'SharedDeck-A32NX-part*of*.zip' | Sort-Object Name)
+$aircraftRevision = 0
+foreach ($part in $parts) {
+    $zip = [System.IO.Compression.ZipFile]::OpenRead($part.FullName)
+    try {
+        $bridge = $zip.Entries | Where-Object { $_.FullName -like '*/A32NX/ExtrasHost/index.js' } | Select-Object -First 1
+        if ($bridge) {
+            $reader = New-Object System.IO.StreamReader($bridge.Open())
+            $match = [regex]::Match($reader.ReadToEnd(), 'SHAREDDECK_AIRCRAFT_REVISION\s*=\s*(\d+)')
+            $reader.Dispose()
+            if ($match.Success) { $aircraftRevision = [int]$match.Groups[1].Value }
+        }
+    } finally {
+        $zip.Dispose()
+    }
+}
+$files = @(Get-Item (Join-Path $dist 'SharedDeck-Setup.exe')) + $parts | ForEach-Object {
+    [ordered]@{ name = $_.Name; size = $_.Length; sha256 = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }
+}
+$manifest = [ordered]@{ version = $version; aircraftRevision = $aircraftRevision; files = @($files) }
+[System.IO.File]::WriteAllText((Join-Path $dist 'shareddeck-release.json'), ($manifest | ConvertTo-Json -Depth 4))
+Write-Host "Fertig: shareddeck-release.json (Version $version, Flugzeug-Revision $aircraftRevision, $($files.Count) Dateien)"

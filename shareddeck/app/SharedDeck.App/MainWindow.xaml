@@ -35,6 +35,25 @@
             </StackPanel>
         </Border>
 
+        <!-- update offer, hidden until a newer release exists -->
+        <Border x:Name="UpdateCard" DockPanel.Dock="Top" Visibility="Collapsed" CornerRadius="6" Padding="14,10" Margin="0,0,0,12"
+                Background="#E8F0FE" BorderBrush="#2563EB" BorderThickness="1">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
+                    <Button x:Name="UpdateNowButton" Content="Jetzt aktualisieren" Click="OnUpdateNow" />
+                    <Button x:Name="UpdateLaterButton" Content="Später" Click="OnUpdateLater" Margin="0" />
+                </StackPanel>
+                <StackPanel>
+                    <TextBlock x:Name="UpdateTitle" FontWeight="SemiBold" FontSize="14" />
+                    <TextBlock x:Name="UpdateText" TextWrapping="Wrap" Margin="0,4,0,0" />
+                    <DockPanel x:Name="UpdateProgressPanel" Visibility="Collapsed" Margin="0,8,0,0">
+                        <TextBlock x:Name="UpdateProgressText" DockPanel.Dock="Right" Margin="8,0,0,0" MinWidth="150" TextAlignment="Right" />
+                        <ProgressBar x:Name="UpdateProgress" Height="14" Minimum="0" Maximum="100" />
+                    </DockPanel>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
         <!-- connection -->
         <Border DockPanel.Dock="Top" Style="{StaticResource Card}">
             <Grid>
@@ -73,6 +92,7 @@
             <Button x:Name="AdoptButton" Content="Lokale Variablen freigeben" Click="OnAdopt"
                     ToolTip="Übernimmt die als lokal beschrieben gemeldeten Variablen in die Freigabeliste (Host, wirkt ab der nächsten Verbindung)." />
             <Button Content="Konfiguration öffnen" Click="OnOpenConfig" />
+            <Button x:Name="CheckUpdatesButton" Content="Nach Updates suchen" Click="OnCheckUpdates" />
             <Button Content="Protokollordner öffnen" Click="OnOpenLogs"
                     ToolTip="Die Protokolle (eine Datei pro Tag) zum Weitergeben, wenn etwas nicht klappt." />
         </StackPanel>

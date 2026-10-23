@@ -59,6 +59,7 @@ public partial class MainWindow : Window
         };
         CheckInstallation();
         Render();
+        StartUpdateCheck();
     }
 
     /// <summary>Is the SharedDeck module and the SharedDeck A32NX in the simulator? Without them the bridge never connects.</summary>

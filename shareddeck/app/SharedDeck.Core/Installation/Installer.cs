@@ -265,7 +265,7 @@ public static class Installer
 
         using var key = Registry.CurrentUser.CreateSubKey(UninstallKey);
         key.SetValue("DisplayName", "SharedDeck – Shared Cockpit für MSFS 2024");
-        key.SetValue("DisplayVersion", "0.2.1");
+        key.SetValue("DisplayVersion", "0.3.0");
         key.SetValue("Publisher", "SharedDeck");
         key.SetValue("DisplayIcon", app);
         key.SetValue("InstallLocation", options.InstallDirectory);
@@ -287,6 +287,13 @@ public static class Installer
         shortcut.WorkingDirectory = workingDirectory;
         shortcut.Description = "SharedDeck – gemeinsam im Cockpit fliegen";
         shortcut.Save();
+    }
+
+    /// <summary>Where SharedDeck is installed now, so an update goes to the same place.</summary>
+    public static string? InstalledDirectory()
+    {
+        using var key = Registry.CurrentUser.OpenSubKey(UninstallKey);
+        return key?.GetValue("InstallLocation") as string;
     }
 
     public static bool IsInstalled()
