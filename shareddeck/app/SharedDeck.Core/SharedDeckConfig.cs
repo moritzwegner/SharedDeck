@@ -31,7 +31,7 @@ public sealed class LVarAction
 public sealed class SharedDeckConfig
 {
     /// <summary>Raised whenever the default sync lists change, so older files are upgraded on load.</summary>
-    public const int CurrentVersion = 4;
+    public const int CurrentVersion = 5;
 
     [JsonPropertyName("configVersion")] public int ConfigVersion { get; set; }
     [JsonPropertyName("peerPort")] public int PeerPort { get; set; } = 51530;
@@ -211,11 +211,11 @@ public sealed class SharedDeckConfig
         AVars =
         {
             // everything FBW writes into the simulator itself, set on the client the same way (SimConnect)
-            new() { Name = "FUEL TANK CENTER QUANTITY", Unit = "gallons", Setter = "@sc", Tolerance = 0.001 },
-            new() { Name = "FUEL TANK LEFT MAIN QUANTITY", Unit = "gallons", Setter = "@sc", Tolerance = 0.001 },
-            new() { Name = "FUEL TANK LEFT AUX QUANTITY", Unit = "gallons", Setter = "@sc", Tolerance = 0.001 },
-            new() { Name = "FUEL TANK RIGHT MAIN QUANTITY", Unit = "gallons", Setter = "@sc", Tolerance = 0.001 },
-            new() { Name = "FUEL TANK RIGHT AUX QUANTITY", Unit = "gallons", Setter = "@sc", Tolerance = 0.001 },
+            new() { Name = "FUEL TANK CENTER QUANTITY", Unit = "gallons", Setter = "@sc", Tolerance = 0.01 },
+            new() { Name = "FUEL TANK LEFT MAIN QUANTITY", Unit = "gallons", Setter = "@sc", Tolerance = 0.01 },
+            new() { Name = "FUEL TANK LEFT AUX QUANTITY", Unit = "gallons", Setter = "@sc", Tolerance = 0.01 },
+            new() { Name = "FUEL TANK RIGHT MAIN QUANTITY", Unit = "gallons", Setter = "@sc", Tolerance = 0.01 },
+            new() { Name = "FUEL TANK RIGHT AUX QUANTITY", Unit = "gallons", Setter = "@sc", Tolerance = 0.01 },
             new() { Name = "PAYLOAD STATION WEIGHT", Unit = "pounds", Index = 1, IndexTo = 8, Setter = "@sc", Tolerance = 0.01 },
             new() { Name = "AILERON POSITION", Unit = "position", Setter = "@sc", Tolerance = 1e-4 },
             new() { Name = "ELEVATOR POSITION", Unit = "position", Setter = "@sc", Tolerance = 1e-4 },
@@ -233,9 +233,10 @@ public sealed class SharedDeckConfig
             new() { Name = "RUDDER TRIM PCT", Unit = "percent over 100", Setter = "@sc", Tolerance = 1e-6 },
             new() { Name = "SPOILERS HANDLE POSITION", Unit = "percent", Setter = "@sc", Tolerance = 0.001 },
             new() { Name = "GENERAL ENG THROTTLE LEVER POSITION", Unit = "percent", Index = 1, IndexTo = 2, Setter = "@sc", Tolerance = 0.001 },
-            new() { Name = "TURB ENG CORRECTED N1", Unit = "percent", Index = 1, IndexTo = 2, Setter = "@sc", Tolerance = 0.01 },
-            new() { Name = "TURB ENG CORRECTED N2", Unit = "percent", Index = 1, IndexTo = 2, Setter = "@sc", Tolerance = 0.01 },
-            new() { Name = "GENERAL ENG OIL TEMPERATURE", Unit = "celsius", Index = 1, IndexTo = 2, Setter = "@sc", Tolerance = 0.01 },
+            // the native engine model keeps running on the co-pilot's PC: up to one frame of its drift is accepted
+            new() { Name = "TURB ENG CORRECTED N1", Unit = "percent", Index = 1, IndexTo = 2, Setter = "@sc", Tolerance = 0.5 },
+            new() { Name = "TURB ENG CORRECTED N2", Unit = "percent", Index = 1, IndexTo = 2, Setter = "@sc", Tolerance = 0.5 },
+            new() { Name = "GENERAL ENG OIL TEMPERATURE", Unit = "celsius", Index = 1, IndexTo = 2, Setter = "@sc", Tolerance = 0.5 },
             // native state FBW changes through key events
             // the STD flag first: while it is set, the simulator overrides the setting with 1013.25
             new() { Name = "KOHLSMAN SETTING STD", Unit = "bool", Index = 1, IndexTo = 2, Setter = "@sc" },

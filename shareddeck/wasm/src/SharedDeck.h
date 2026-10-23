@@ -116,6 +116,7 @@ class SharedDeck {
   void clientFlushInputs();
   void queueLvarInput(const std::string& name, double value);
   void clientApplyPhysics(double deltaTime);
+  void clientReapplySimConnectVars();
   void clientVerify();
   void clientRequestKeyframe(const std::string& reason);
   std::string clientComputeMirrorHash() const;

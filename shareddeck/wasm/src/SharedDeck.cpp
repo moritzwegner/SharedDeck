@@ -498,6 +498,7 @@ void SharedDeck::onFrame(double deltaTime) {
     clientDetectInputs();
     clientFlushInputs();
     clientApplyPhysics(deltaTime);
+    clientReapplySimConnectVars();
     if (secondTick) {
       setFreeze(true);
       clientVerify();
@@ -1135,6 +1136,16 @@ void SharedDeck::clientApplyPhysics(double deltaTime) {
   state.altitude += worldVelocityUp * physicsAge;
 
   SimConnect_SetDataOnSimObject(simConnect, DEF_PHYSICS, SIMCONNECT_OBJECT_ID_USER, 0, 0, sizeof(state), &state);
+}
+
+void SharedDeck::clientReapplySimConnectVars() {
+  // FBW overrides these native values in every frame (engine speeds, fuel, surfaces, ...), because the
+  // simulator's own models keep changing them; between two host frames they would drift here as well
+  for (const auto& avar : avars) {
+    if (avar.setter == "@sc" && avar.hasValue && !avar.declaredLocal) {
+      writeAVar(avar, avar.value);
+    }
+  }
 }
 
 void SharedDeck::clientVerify() {
